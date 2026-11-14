@@ -87,3 +87,16 @@ directory. Separate temporary Core and Instance Git repositories were used for
 version and lifecycle checks. A Core-only Git bundle preserves local Core history
 for cloning into a normal Git-enabled location. The supplied source files remain
 editable; remote creation, visibility changes and pushing remain unapproved.
+
+## Claude Code provider addition (proposed)
+
+The new Claude adapter's launch-plan construction, fail-closed behavior,
+runtime-specific diagnostics, and session metadata are covered by automated
+unit tests with mocked Claude process execution. The real authenticated Claude
+CLI and its operating-system sandbox are **not available or validated** in this
+development session. The model-assisted preflight requires a supported local
+host, verified authenticated Claude runtime, and a disposable work unit before
+any production use. GitHub CI provides Python test evidence, not Claude
+end-to-end security verification. The earlier v0.1 validation facts above
+describe the earlier baseline; they are not a claim that the new adapter ran
+in the original validation environment.
