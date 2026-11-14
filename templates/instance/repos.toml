@@ -1,0 +1,20 @@
+[[repos]]
+name = "example"
+folder = "example"
+remote = "https://github.com/example/project.git"
+default_branch = "main"
+protected = true
+checkout = false
+visible = true
+description = "Attach an existing checkout; opt in to cloning with checkout = true"
+
+[[repos]]
+name = "agent-hub"
+folder = "agent-hub"
+remote = "https://github.com/drewbarontini/agent-hub.git"
+default_branch = "main"
+protected = true
+checkout = false
+visible = false
+description = "Editable Core source, independent of installed runtime"
+

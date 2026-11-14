@@ -1,0 +1,95 @@
+# Getting started
+
+## Discover and propose
+
+Start in a committed Core checkout. Use Python 3.11+; `python3.13` below is an
+example executable, not a required minor version. Discovery only scans explicit
+roots, at a bounded depth, and stops at repository boundaries:
+
+```sh
+python3.13 bin/hub discover --root /approved/projects --depth 2
+```
+
+The report lists Git metadata, instruction filenames, native skill directories,
+and whether a project `.mcp.json` exists. It does not read context documents,
+credentials, skills, or MCP configuration contents. It does not infer remote
+authentication. Discover user-level MCPs and skills through provider-native tools
+only after authorization. See `prompts/initialize.md` for the conversational flow.
+
+Review repository selection, remotes, branches, clone/attach choices, visibility,
+work sources, context locations, skills, services and local overrides. Unknown
+connections remain unverified. Configuration changes happen after proposal review.
+
+## Configure
+
+```sh
+python3.13 bin/hub init /approved/my-hub --name my-hub --core-source . --ref HEAD
+```
+
+Initialization refuses a nonempty destination unless it already contains a valid
+Instance. Repeating initialization preserves its configuration and reinstalls a
+missing pinned Core. If interrupted during first initialization, inspect the
+partial directory and use a new empty destination; do not blindly erase it.
+
+Edit `repos.toml`. Replace the empty `repos = []` with entries adapted from
+`templates/instance/repos.toml`. Use the actual origin and actual default branch.
+Names and folders need not match the remote's repository name. `checkout = true`
+permits bootstrap cloning; `false` registers a resource without cloning it.
+
+Use `local.toml` for existing repositories outside the default sibling location:
+
+```toml
+[repos.example]
+path = "/approved/existing/project"
+
+[tools]
+codex = "/path/to/codex"
+```
+
+Register resources in `hub.toml`; use an approved external overlay when individual
+references should stay outside shared configuration. Do not store credentials in
+any of these files. Repositories can stay hidden from the Explorer with
+`visible = false` while remaining available to agents.
+
+## Verify and open
+
+From the Instance directory:
+
+```sh
+python3.13 .hub/bin/hub config-check
+python3.13 .hub/bin/hub bootstrap
+python3.13 .hub/bin/hub resources
+python3.13 .hub/bin/hub doctor
+python3.13 .hub/bin/hub workspace
+code .hub/hub.code-workspace
+```
+
+Doctor's exit status is nonzero when required prerequisites or registered
+repositories are unavailable. Optional resources produce explicit availability and
+connectivity information. A passing doctor is not a passing runtime sandbox test.
+
+Launch the Orchestrator using the workspace task or CLI command. Agent launch
+plans use explicit permissions and `never` approval escalation. The CLI
+Orchestrator cannot mutate Hub state in read-only mode: run authorized lifecycle
+commands in another terminal. Native IDE agents have independent permission
+settings; a generated workspace cannot enforce those settings.
+
+Create a small work unit, prepare it, run `sandbox-check`, and launch a Worker as
+shown in README.md. If the host cannot enforce the requested sandbox, stop there
+and diagnose the host/runtime. Do not disable sandboxing to make the demo pass.
+
+## Another machine
+
+Commit the Instance's intended configuration, Core lock, and appropriate durable
+work metadata to its independently owned repository. After cloning it elsewhere,
+run initialization from an available Core checkout against that existing Instance.
+Provide local overrides for repository paths, executable paths and overlays;
+bootstrap the repositories and regenerate the workspace. The pinned Core commit
+must be reachable from its source. Before public release, provide an explicit
+local Core source in `local.toml` on each machine.
+
+Native sessions, caches, credentials, uncommitted changes and local worktrees are
+not transferred. Push authorized task branches through their repository's normal
+review process. Work records identify branches and base commits for manual recovery
+or another prepared session; v0.1 refuses automatic ambiguous branch reattachment.
+

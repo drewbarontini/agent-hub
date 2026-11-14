@@ -1,0 +1,39 @@
+schema_version = 1
+
+[instance]
+name = "example"
+purpose = "Coordinate a coherent working environment"
+
+[agent]
+runtime = "codex"
+
+[[resources]]
+name = "project-notes"
+kind = "context"
+path = "../notes"
+purpose = "Authoritative project notes; referenced, not copied"
+
+[[resources]]
+name = "coding-skills"
+kind = "capability"
+path = "../skills"
+runtimes = ["codex", "claude"]
+purpose = "Independent reusable skills"
+usage = "Use provider-native discovery; read the selected skill before invoking"
+
+[[resources]]
+name = "issue-source"
+kind = "work"
+location = "https://github.com/example/project/issues"
+purpose = "Authoritative tasks; external integration not implemented"
+
+[[resources]]
+name = "web-dev"
+kind = "service"
+repo = "example"
+command = ["npm", "run", "dev"]
+environment = ["DEVELOPMENT_API_URL"]
+preview_url = "http://localhost:3000"
+autostart = false
+sensitive = false
+

@@ -1,0 +1,12 @@
+# Ignored machine-local resolution. Do not put credentials here.
+# overlay = "/approved/private/location/personal.toml"
+
+[paths]
+repos_root = "../"
+
+[repos.example]
+path = "/path/to/existing/project"
+
+[tools]
+codex = "/path/to/codex"
+

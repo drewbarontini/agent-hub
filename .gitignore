@@ -1,0 +1,12 @@
+__pycache__/
+*.py[cod]
+.venv/
+.hub/
+local.toml
+*.code-workspace
+.env
+.env.*
+!.env.example
+.DS_Store
+*.bundle
+

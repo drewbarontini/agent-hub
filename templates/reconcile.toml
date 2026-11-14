@@ -1,0 +1,14 @@
+# Supply an authorized capability inventory; no source code or private context.
+[[capabilities]]
+name = "worktrees"
+description = "Existing task-specific multi-repository worktrees"
+ownership = "organization"
+provider = "claude"
+conflicts = "Validate ticket naming, branch guards and cleanup parity"
+
+[[capabilities]]
+name = "data-desk"
+description = "Independent reporting resource"
+ownership = "organization"
+provider = "claude"
+generalizable = false

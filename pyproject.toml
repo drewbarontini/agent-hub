@@ -1,0 +1,7 @@
+[project]
+name = "agent-hub-core"
+version = "0.1.0"
+description = "One core. Many contexts. Independent ownership."
+requires-python = ">=3.11"
+dependencies = []
+
