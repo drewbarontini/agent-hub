@@ -95,7 +95,12 @@ connectivity exists merely because it appears in Hub configuration.
 `--restricted` mode, explicitly selected tools, `dontAsk`, and session
 settings requiring sandbox startup. Native command sandboxing denies unsandboxed
 retries, disallows command network access, and protects Git metadata. Native
-file tools use Claude's working-directory restrictions. Worker MCP tools and web
+file tools use Claude's working-directory restrictions and explicit Edit denials
+for instruction files, provider configuration and Git metadata. Linked worktrees
+receive read access to their validated shared Git directories, but those locations
+remain write-denied. A native Bash probe also checks read-only Git access;
+permission-rule enforcement must still be verified in an authenticated Claude
+session. Worker MCP tools and web
 tools are excluded; do not assume an external Notion/Linear reference or skill
 repository can be accessed from this restricted session. Supply bounded local
 context only where the authorized workflow permits it. Native skills/hooks and
