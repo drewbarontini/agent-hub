@@ -1,5 +1,44 @@
 # Architecture
 
+## Three-part operating model
+
+Agent Hub coordinates work through **Orchestrator, Workers, and Context**.
+
+| Part | Role | Boundary |
+| --- | --- | --- |
+| **Orchestrator** | Review the board with the human, clarify priorities and intent, delegate bounded work, and integrate outcomes. | Coordinates; does not micromanage Worker execution or make consequential decisions on the person's behalf. |
+| **Workers** | Independently investigate, implement, verify, and report within delegated scope, using appropriate Instance skills (such as Equilio Coding where installed). | Own execution of the assigned work, not strategic direction or authorization beyond the handoff. |
+| **Context** | Hold the authoritative information for direction, execution and continuity. | Context is referenced at its source; Agent Hub is not a parallel task board or knowledge database. |
+
+Context has three complementary forms:
+
+- **Board — what needs doing:** the canonical work source (for example Linear, GitHub Issues, Notion, or Markdown). It carries work status, intent, ownership, outcomes and verification according to the source's native schema.
+- **Memory — what we have learned:** durable decisions, lessons, evidence and unresolved questions, stored in the existing work source or other authorized knowledge records. Not agent chat history or a mandatory new database.
+- **Docs — what we know:** product, system and project conventions, repository instructions, specifications, and reference documentation.
+
+These can live in the same system or different systems. Neither a particular provider nor automated authentication is required. A configured reference is not verified access.
+
+**Working flow:**
+
+```mermaid
+flowchart TD
+  Human["Human judgment and direction"] <--> O["Orchestrator<br/>Review · Decide · Delegate · Integrate"]
+  C["Context<br/>Board · Memory · Docs"] <--> O
+  O -->|"Bounded, authorized handoff"| W["Workers<br/>Investigate · Execute · Verify"]
+  C -->|"Read relevant authorized context"| W
+  W -->|"Reconcile results and learning"| C
+  W -->|"Escalate consequential choices"| O
+```
+
+1. **Review:** The human and Orchestrator examine the configured Board and relevant Context; exploration may end without creating work.
+2. **Decide and delegate:** Agree on a useful outcome and scope. The Orchestrator prepares or references the canonical work artifact, passes relevant context and verification expectations, and delegates execution to a Worker.
+3. **Execute:** The Worker uses appropriate skills and tools, updates the owning artifact as understanding changes, verifies results, and escalates consequential unresolved decisions. It operates independently rather than requiring constant Orchestrator supervision.
+4. **Integrate:** The Orchestrator reads authoritative updates and evidence, assesses implications, and helps the human decide what happens next. Implementation, PR review, merge, release, and observed value remain distinct states.
+
+This is an operating model, not a fixed software-development pipeline. Workers can investigate uncertainty or produce non-code artifacts; skills determine their own methods. No new handoff document or task registry is required if the owning source already provides continuity.
+
+## Ownership and implementation
+
 Core is a small CLI, not an owner of every resource. It uses Git, files, existing
 agent runtimes and VS Code. An Instance's version history is independent of Core;
 its overlay is independently owned and optional.
