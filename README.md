@@ -11,6 +11,22 @@ isolation, durable work handoffs, a generated VS Code workspace, and deliberate
 Core updates. There is no server, database, custom editor extension, or mandatory
 work-management provider.
 
+## Operating model
+
+Agent Hub has **three conceptual parts**:
+
+| Part | Responsibility |
+| --- | --- |
+| **Orchestrator** | Your conversational interface: review work, explore priorities, agree on delegation, and integrate results. |
+| **Workers** | Own bounded execution using the skills and tools available in the Instance; investigate, implement, verify, and report. |
+| **Context** | The authoritative sources that make work understandable and continuous: **Board** (what needs doing), **Memory** (decisions and learning), and **Docs** (how things work). |
+
+**Board, Memory, and Docs are functions of context, not mandatory Agent Hub databases or new agent roles.** A Board may be in Linear, GitHub, Notion, or Markdown. Memory and Docs may live alongside it or in separate authorized sources. The Instance registers references; it does not duplicate their contents.
+
+**Normal flow:** Review the Board with the Orchestrator → decide together what to delegate → give a Worker the owning work item, relevant context, scope, authority, and verification expectations → let the Worker execute independently → reconcile outcomes and learning back into the authoritative sources. Human judgment governs consequential decisions; discussion does not itself authorize work.
+
+This operating model is distinct from the **Core → Instance → Personal Overlay** ownership boundaries described below. Editor layout and agent provider are implementation choices.
+
 ## Start
 
 Requirements: Python **3.11+**, Git **2.31+**, and macOS or Linux. VS Code and Codex
