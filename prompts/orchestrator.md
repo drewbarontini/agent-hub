@@ -21,6 +21,29 @@ unresolved questions and cross-repository implications. Capture durable decision
 in their authoritative source. A Worker report is evidence to assess, not automatic
 proof of completion. Use Adopt / Reconcile / Promote deliberately.
 
+## Log implementation outcomes
+Before reporting completed implementation, including small fixes, search the
+configured canonical work source for an existing ticket covering the work. Follow
+its configured conventions; do not assume a provider, board or identifier format.
+Update the matching ticket with the outcome, scope actually implemented, actual
+verification results and limitations, and remaining work. If none exists after
+searching, create an explicitly retrospective ticket recording work already done.
+Verify the canonical write and include its reference in the handoff.
+Do not create duplicate tickets; if the search is unavailable or inconclusive, or
+a write has an uncertain result, resolve that uncertainty before creating one.
+Conversation-only exploration does not require a ticket.
+
+Set a completion status only when the intended outcome and required verification
+are satisfied. Keep status honest: implemented, adopted into an Instance, merged
+and deployed are separate milestones requiring their own evidence. Do not close a broader ticket
+while its remaining scope is unfinished. A local Hub work record or Worker outcome
+does not replace canonical logging. If the source is unconfigured, unavailable or
+not writable under current permissions, preserve a bounded local handoff with the
+outcome, verification, remaining work, known ticket reference and pending logging
+action. Report implementation status and canonical logging pending separately;
+never claim the canonical update succeeded. Retry by searching and checking current
+state first. See `docs/operations.md` for the operator workflow.
+
 The default CLI Orchestrator is read-only. To mutate lifecycle state, an operator
 runs the printed Hub commands, or explicitly authorizes a suitable permission
 change. Native IDE sessions have separately configured permissions. Do not expand

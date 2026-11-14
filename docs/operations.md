@@ -56,6 +56,40 @@ Commit appropriate `work/<id>/unit.json` and handoff files to the independently
 owned Instance if continuity between machines matters. Inspect imported outcomes
 for private content before sharing. Native agent transcripts and `.hub/` remain local.
 
+## Canonical completion logging
+
+Before reporting completed implementation, log the outcome in the Instance's
+configured canonical work source. This includes small fixes; conversation-only
+exploration does not require a ticket. Use the configured source and its conventions
+without assuming a provider, board, identifier prefix or authenticated connection.
+This is an operating rule, not a new connector or automatic Hub state sync.
+
+1. Search the canonical source for a ticket covering the work, checking any supplied
+   source reference and related scope before creating anything. Reuse a matching
+   ticket. If the search is unavailable or inconclusive, keep logging pending rather
+   than risk a duplicate. Resolve uncertain write results by checking current state.
+2. Update the matching ticket with the outcome, scope actually implemented, actual
+   verification commands/results and limitations, and remaining work. Only when the
+   search finds no existing ticket, create an explicitly retrospective ticket that
+   describes implementation already performed; do not imply prior planning or approval.
+3. Set a completion status only when the intended outcome and required verification
+   are satisfied. Preserve unfinished scope and record the next action. Do not close
+   a broader ticket just because this implementation is done. Distinguish implementation,
+   adoption into an Instance, merge and deployment; claim each only with evidence.
+4. Verify the canonical write and include its reference in the handoff. Hub source
+   fields, `outcome.md` and `work report` provide local continuity; they do not prove
+   that a canonical ticket was updated.
+
+If the source is unconfigured, unavailable or not writable under current permissions,
+keep a bounded local handoff in `outcome.md` (or the existing work handoff) with the
+outcome, actual verification, remaining work, known ticket reference, logging blocker
+and exact pending action. Report implementation status separately from **canonical
+logging pending**. Do not expand permissions or add an integration to complete the
+log. An authorized operator can finish it later: search and check current state
+again, update the matching ticket or create a retrospective ticket only if none
+exists, then record the verified reference. A pending log must not be reported as
+a successful canonical update.
+
 ## Conservative cleanup
 
 ```sh
