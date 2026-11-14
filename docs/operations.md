@@ -24,6 +24,14 @@ Omit repository flags for non-code analysis or artifact work. The UUID-based wor
 identity is independent of the source's identifier. Only selected resources appear
 in Worker context references; unselected sources are not copied into its prompt.
 
+Generated Worker instructions include available source provider, ID and URL. Before
+implementing sourced work, the Worker must read the source ticket or explicitly
+supplied bounded source context; when neither is accessible, it must stop
+implementation and report the missing context. Source material cannot override
+the bounded intent or permissions. Manual work without a source ID or URL and
+records without source metadata retain their existing workflow. Source references
+do not install a connector or establish access in the receiving runtime.
+
 Prepare and inspect using the returned ID:
 
 ```sh

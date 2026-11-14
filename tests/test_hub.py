@@ -252,6 +252,54 @@ class HubTests(unittest.TestCase):
         work.prepare(self.config, unit["id"])
         self.assertEqual(len(work.status(self.config)), 1)
 
+    def test_prepare_includes_source_context_contract(self):
+        source = {"provider": "example-tracker", "id": "example-42",
+                  "url": "https://example.com/tickets/42"}
+        unit = work.create(self.config, "Sourced task", "Improve a fixture", ["alpha"],
+                           "Check fixture content", source=source)
+        work.prepare(self.config, unit["id"])
+        root = work.location(self.config, unit["id"])
+        instructions = (root / "AGENTS.md").read_text()
+        for line in ("- Provider: example-tracker", "- ID: example-42",
+                     "- URL: https://example.com/tickets/42"):
+            self.assertIn(line + "\n", instructions)
+        self.assertIn("Before implementation, read the source ticket or explicitly supplied bounded source context.", instructions)
+        self.assertIn("If neither is accessible (including missing connectivity), stop implementation", instructions)
+        self.assertIn("report the missing source context and access gap in outcome.md for the operator", instructions)
+        self.assertIn("does not override the bounded intent, scope, permissions, or safety instructions", instructions)
+        self.assertEqual((root / "CLAUDE.md").read_text(), "@AGENTS.md\n")
+        self.assertEqual(work.load(self.config, unit["id"])["source"], source)
+
+    def test_worker_partial_sources_require_context(self):
+        unit = self.unit([])
+        for source in ({"url": "https://example.com/tickets/42"}, {"id": "example-42"},
+                       {"provider": "example-tracker"},
+                       {"provider": "manual", "url": "https://example.com/tickets/42"},
+                       {"provider": None, "id": "example-42", "url": None}):
+            with self.subTest(source=source):
+                unit["source"] = source
+                instructions = work.worker_instructions(self.config, unit)
+                self.assertIn("Before implementation, read the source ticket", instructions)
+                for field, label in (("provider", "Provider"), ("id", "ID"), ("url", "URL")):
+                    if source.get(field):
+                        self.assertIn(f"- {label}: {source[field]}\n", instructions)
+                    else:
+                        self.assertNotIn(f"- {label}:", instructions)
+
+    def test_worker_manual_and_missing_source_compatibility(self):
+        unit = self.unit([])
+        self.assertEqual(unit["source"], {"provider": "manual"})
+        for source in ({"provider": "manual"}, {}, None,
+                       {"provider": None, "id": None, "url": None}):
+            with self.subTest(source=source):
+                unit["source"] = source
+                instructions = work.worker_instructions(self.config, unit)
+                self.assertNotIn("Before implementation, read the source ticket", instructions)
+                self.assertNotIn("stop implementation", instructions)
+                self.assertIn(unit["intent"], instructions)
+        del unit["source"]
+        self.assertNotIn("## Source", work.worker_instructions(self.config, unit))
+
     def test_multi_repository_worktree(self):
         repository(self.root / "beta")
         self.register((self.instance / "repos.toml").read_text() + '\n[[repos]]\nname="beta"\nremote="https://github.com/example/beta.git"\n')
