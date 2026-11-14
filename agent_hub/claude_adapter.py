@@ -40,15 +40,33 @@ def binary(config):
     return tool
 
 
+def edit_deny(path):
+    """Claude Edit rules use gitignore patterns; // denotes filesystem-absolute."""
+    value = path.resolve().as_posix().lstrip("/")
+    value = "".join("\\" + ch if ch in "*?[]" else ch for ch in value)
+    return f"Edit(//{value})"
+
+
 def worker_settings(config, unit):
     """Session-local safeguards; never rewrite native/managed settings."""
     root = location(config, unit["id"])
     denied = [str(root / "AGENTS.md"), str(root / "CLAUDE.md")]
+    git_dirs = []
     for name in unit["repos"]:
         path = location(config, unit["id"], name)
-        denied.extend(str(path / item) for item in (".git", ".claude", ".codex", ".agents", ".aws"))
-        common = Path(git(path, "rev-parse", "--path-format=absolute", "--git-common-dir"))
+        denied.extend(str(path / item) for item in (
+            "AGENTS.md", "CLAUDE.md", ".mcp.json", ".git", ".claude",
+            ".codex", ".agents", ".aws"))
+        common = Path(git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")).resolve()
         denied.append(str(common))
+        git_dirs.append(str(common))
+    # The Bash sandbox does not cover Claude's native Edit/Write tools.
+    # Deny both exact paths and descendants at the permission layer.
+    edit_denials = sorted({rule for name in denied for rule in (
+        edit_deny(Path(name)), edit_deny(Path(name))[:-1] + "/**)")})
+    # Linked worktrees can have shared Git metadata outside the work-unit root.
+    # Additional directories allow read access under blockReadsOutsideWorkingDirectories;
+    # both Bash and native Edit remain explicitly write-denied above.
     return {
         "sandbox": {
             "enabled": True,
@@ -61,8 +79,9 @@ def worker_settings(config, unit):
         "permissions": {
             "blockReadsOutsideWorkingDirectories": True,
             "blockWritesOutsideWorkingDirectories": True,
+            "additionalDirectories": sorted(set(git_dirs)),
             "allow": ["Read", "Write", "Edit"],
-            "deny": ["WebFetch", "WebSearch", "mcp__*",
+            "deny": ["WebFetch", "WebSearch", "mcp__*", *edit_denials,
                      "Bash(git commit *)", "Bash(git push *)", "Bash(git reset *)",
                      "Bash(git checkout *)", "Bash(git switch *)"],
         },
