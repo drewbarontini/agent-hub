@@ -15,7 +15,7 @@ python3.13 .hub/bin/hub work create --title "Investigate test failures" \
   --intent "Find the cause; make only the necessary fix" \
   --repo frontend --repo backend --resource project-notes \
   --verify "Run relevant tests and describe remaining risks" \
-  --source-provider github --source-id 123 \
+  --source-provider github --source-id 123 --source-key APP-123 \
   --source-url https://github.com/example/project/issues/123
 ```
 
@@ -24,7 +24,14 @@ Omit repository flags for non-code analysis or artifact work. The UUID-based wor
 identity is independent of the source's identifier. Only selected resources appear
 in Worker context references; unselected sources are not copied into its prompt.
 
-Generated Worker instructions include available source provider, ID and URL. Before
+Use the canonical issue title without its key as `--title`. With `--source-key`,
+branches use `<ticket-key>-<issue-title>`, for example
+`APP-123-investigate-test-failures`. The key is separate from an immutable source ID;
+Core does not choose a provider's prefix. Each repository can use the same branch
+name independently. Existing recorded branches remain valid; manual work without a
+key retains UUID-based branch names.
+
+Generated Worker instructions include available source provider, key, ID and URL. Before
 implementing sourced work, the Worker must read the source ticket or explicitly
 supplied bounded source context; when neither is accessible, it must stop
 implementation and report the missing context. Source material cannot override
@@ -60,9 +67,18 @@ python3.13 .hub/bin/hub work report W-REPLACE_WITH_ID \
   --verification "Actual commands/results and any checks not run"
 ```
 
-Commit appropriate `work/<id>/unit.json` and handoff files to the independently
-owned Instance if continuity between machines matters. Inspect imported outcomes
-for private content before sharing. Native agent transcripts and `.hub/` remain local.
+`work/<id>/unit.json` is ignored local execution metadata for repository branches,
+session recovery and bounded execution instructions. Keep canonical requirements,
+decisions, outcomes and verification on the source ticket. Create execution records
+only when coordination needs them, not for every ticket or direct native edit.
+Hub does not create additional handoff copies or import the Worker outcome into
+the record directory; the temporary outcome stays in the ignored execution directory.
+Supply bounded source snapshots there only when the Worker cannot read its source.
+
+New Instances ignore `/work/`. For existing Instances, add `/work/` to `.gitignore`
+and untrack existing records after reconciling their useful evidence to the source.
+Do not remove metadata needed by active sessions or recoverable worktrees. Native
+agent transcripts, execution records, snapshots and `.hub/` remain machine-local.
 
 ## Canonical completion logging
 

@@ -72,15 +72,17 @@ python3.13 .hub/bin/hub work report W-REPLACE_WITH_ID \
 Without `--launch`, agent commands print their launch plans. A Worker launch
 requires a passing filesystem sandbox probe; it never falls back to unrestricted
 execution. Local session logs contain lifecycle event types and exit codes only.
-Work records and handoffs can be committed to
-the Instance for continuity. An agent session is not a work unit.
+Execution records and temporary handoffs stay ignored and machine-local; canonical
+requirements, outcomes and verification stay in the configured work source.
+Create a local execution record only when execution needs it. An agent session is
+not a work unit.
 
 ## Boundaries and current support
 
 | Boundary | Owns |
 | --- | --- |
 | Core | Reusable tools, conventions, prompts, templates, tests |
-| Instance | Identity, registry, resource references, durable work, local policies |
+| Instance | Identity, registry, resource references, local policies and ignored execution metadata |
 | Personal Overlay | Optional individual references and preferences in an approved location |
 
 | Capability | v0.1 status |

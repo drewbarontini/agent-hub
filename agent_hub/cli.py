@@ -45,6 +45,7 @@ def parser():
     r.add_argument("--resource", action="append", default=[])
     r.add_argument("--source-provider", default="manual")
     r.add_argument("--source-id")
+    r.add_argument("--source-key", help="Human ticket key used in branch names; distinct from immutable source ID")
     r.add_argument("--source-url")
     for name in ["prepare", "status", "cleanup", "report", "release"]:
         r = sub.add_parser(name)
@@ -143,6 +144,8 @@ def dispatch(args):
             source = {"provider": args.source_provider}
             if args.source_id:
                 source["id"] = args.source_id
+            if args.source_key:
+                source["key"] = args.source_key
             if args.source_url:
                 source["url"] = args.source_url
             return work.create(config, args.title, args.intent, args.repo, args.verify, source, args.resource)

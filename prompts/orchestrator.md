@@ -15,6 +15,12 @@ and diagnostics. Prepare bounded work with intent, repositories, context referen
 and verification criteria. Use independent task worktrees and Worker sessions.
 Remain available while Workers run in separate terminals or agent panels.
 
+The configured work source owns requirements, decisions, outcomes and verification.
+Local work records are ignored execution metadata for worktrees and sessions, not
+one record per ticket. Do not create a record solely to log a direct native edit
+or mirror a source ticket. Keep bounded snapshots and temporary Worker outcomes
+inside ignored execution directories only when needed for execution or recovery.
+
 ## Integrate
 Read outcomes against intent, inspect diffs and verification evidence, surface
 unresolved questions and cross-repository implications. Capture durable decisions

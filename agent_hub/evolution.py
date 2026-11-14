@@ -70,7 +70,7 @@ def init(root, name, source, ref="HEAD", purpose="Coordinate intentional work", 
     commit = resolve(source, ref)
     install(root, source, commit)
     run(["git", "init", "-b", "main", root])
-    write(root / ".gitignore", ".hub/\nlocal.toml\n*.code-workspace\n.env\n.env.*\n!.env.example\n__pycache__/\n.DS_Store\n")
+    write(root / ".gitignore", ".hub/\n/work/\nlocal.toml\n*.code-workspace\n.env\n.env.*\n!.env.example\n__pycache__/\n.DS_Store\n")
     write(root / "hub.toml", f"schema_version = 1\n\n[instance]\nname = {toml_string(name)}\npurpose = {toml_string(purpose)}\n\n[agent]\nruntime = \"codex\"\n\n# Register resources with [[resources]]. See Core docs/configuration.md.\n")
     write(root / "repos.toml", "# [[repos]] entries describe repositories; paths resolve locally.\nrepos = []\n")
     source_path = Path(source).expanduser()

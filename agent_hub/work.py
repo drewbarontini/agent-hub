@@ -32,6 +32,15 @@ def record_path(config, identifier):
     return child(config.root, "work", slug(identifier), "unit.json")
 
 
+def branch_name(unit, name):
+    key = (unit.get("source") or {}).get("key")
+    if key:
+        slug(key)
+        title = re.sub(r"[^a-z0-9]+", "-", unit["title"].lower()).strip("-")
+        return f"{key}-{title[:80].rstrip('-') or 'work'}"
+    return f"hub/{unit['id']}/{name}"
+
+
 def load(config, identifier):
     unit = read_json(record_path(config, identifier))
     if unit.get("id") != identifier or unit.get("schema_version") != 1:
@@ -39,7 +48,7 @@ def load(config, identifier):
     for name, entry in unit.get("repos", {}).items():
         config.repo(name)
         slug(name)
-        if entry.get("branch") != f"hub/{identifier}/{name}":
+        if entry.get("branch") not in {f"hub/{identifier}/{name}", branch_name(unit, name)}:
             raise HubError("Invalid work branch")
         if not re.fullmatch(r"[0-9a-f]{40}", entry.get("base", "")):
             raise HubError("Invalid work base commit")
@@ -72,12 +81,10 @@ def create(config, title, intent, names, verification, source=None, resource_nam
             "created_at": now(), "verification": [], "sessions": []}
     for name in names:
         repo = config.repo(name)
-        unit["repos"][name] = {"branch": f"hub/{identifier}/{name}",
+        unit["repos"][name] = {"branch": branch_name(unit, name),
                                "base": git(repo["path"], "rev-parse", "refs/heads/" + repo["default_branch"])}
     with mutation(config):
         persist(config, unit)
-        write(record_path(config, identifier).parent / "handoff.md",
-              f"# {identifier}: {title}\n\nIntent: {intent}\n\nVerification: {verification}\n\nOutcome: pending.\n")
     return unit
 
 
@@ -119,12 +126,12 @@ def worker_instructions(config, unit):
              "A prepared worktree is isolation, not a read-access or confidentiality sandbox.", "", "## Repositories"]
     lines += [f"- {name}: ./{name} on {entry['branch']}" for name, entry in unit["repos"].items()]
     source = unit.get("source") or {}
-    if any(source.get(field) for field in ("provider", "id", "url")):
+    if any(source.get(field) for field in ("provider", "key", "id", "url")):
         lines += ["", "## Source"]
-        for field, label in (("provider", "Provider"), ("id", "ID"), ("url", "URL")):
+        for field, label in (("provider", "Provider"), ("key", "Key"), ("id", "ID"), ("url", "URL")):
             if source.get(field):
                 lines.append(f"- {label}: {source[field]}")
-    if source.get("id") or source.get("url") or source.get("provider") not in (None, "", "manual"):
+    if source.get("key") or source.get("id") or source.get("url") or source.get("provider") not in (None, "", "manual"):
         lines += ["",
                   "Before implementation, read the source ticket or explicitly supplied bounded source context.",
                   "If neither is accessible (including missing connectivity), stop implementation and report the missing source context and access gap in outcome.md for the operator.",
@@ -231,9 +238,6 @@ def report(config, identifier, summary, verification=None):
             content = outcome.read_text()
             if scan_text(content):
                 raise HubError("Possible credential in Worker outcome; review it locally before importing")
-            write(record_path(config, identifier).parent / "worker-outcome.md", content)
-        write(record_path(config, identifier).parent / "handoff.md",
-              f"# {identifier}: {unit['title']}\n\nIntent: {unit['intent']}\n\nOutcome: {summary}\n\nVerification: {verification or 'pending'}\n")
         persist(config, unit)
         return unit
 

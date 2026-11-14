@@ -3,7 +3,8 @@
 Status: accepted, 2026-11-14.
 
 Core is a Python 3.11+ standard-library CLI. An Instance has its own Git history,
-`hub.toml`, `repos.toml`, durable `work/` metadata, and optional instructions.
+`hub.toml`, `repos.toml`, and optional instructions. Ignored `work/` metadata
+supports local execution recovery; canonical work context remains with its source.
 Ignored local settings resolve machine paths and an optional external overlay.
 
 Each Instance installs a detached Core checkout at `.hub/cores/<commit>`. A portable

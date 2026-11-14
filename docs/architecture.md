@@ -8,7 +8,7 @@ its overlay is independently owned and optional.
 | --- | --- |
 | `config.py` | TOML layers, registry validation, local path resolution |
 | `repos.py` | Identity checks, discovery, bootstrap, workspace, diagnostics, guards |
-| `work.py` | Durable work, worktree preparation, inspection, cleanup and handoffs |
+| `work.py` | Local execution recovery, worktree preparation, inspection and cleanup |
 | `agents.py` | Small Codex launch adapter and filesystem sandbox probe |
 | `evolution.py` | Initialization, pinned adoption, rollback, reconciliation, promotion |
 | `security.py` | Heuristic credential and private-file scanning |
@@ -31,12 +31,15 @@ flowchart TD
 
 Each work record has a UUID-based identity, intent, verification criteria, optional
 source identity, scoped resource names, repository branch/base references, session
-leases and a handoff. It records local execution context without mirroring an
+leases and brief operator evidence. It records local execution context without mirroring an
 external provider's project state. No remote provider adapter is implemented yet.
 
 Work metadata lives in `work/<id>/`. Generated execution directories live in
-`.hub/worktrees/<id>/<repo>/`. Metadata and relevant artifacts can be reviewed and
-committed; generated paths, raw logs and checkouts stay machine-local. Local file
+`.hub/worktrees/<id>/<repo>/`. Records are ignored execution metadata, not mirrored
+source tickets. Requirements, outcomes and verification belong in the canonical
+work source; create a local record only when execution needs it. Bounded
+instructions, temporary outcomes, source snapshots, raw logs and checkouts stay
+machine-local. Local file
 locking serializes mutations on a machine; this is not distributed locking between
 team members or machines. Coordinate branch ownership through your work source.
 

@@ -270,9 +270,55 @@ class HubTests(unittest.TestCase):
         self.assertEqual((root / "CLAUDE.md").read_text(), "@AGENTS.md\n")
         self.assertEqual(work.load(self.config, unit["id"])["source"], source)
 
+    def test_ticket_key_names_branches_through_cli(self):
+        repository(self.root / "beta")
+        self.register((self.instance / "repos.toml").read_text() + '\n[[repos]]\nname="beta"\nremote="https://github.com/example/beta.git"\n')
+        result = run([sys.executable, CORE / "bin/hub", "--instance", self.instance,
+                      "work", "create", "--title", "Fix / cache: stale entries?",
+                      "--intent", "Improve a fixture", "--verify", "Check fixture content",
+                      "--repo", "alpha", "--repo", "beta", "--source-provider", "example-tracker",
+                      "--source-id", "immutable-page-id", "--source-key", "ENG-42",
+                      "--source-url", "https://example.com/tickets/42"])
+        unit = json.loads(result.stdout)
+        work.prepare(self.config, unit["id"])
+        recovered = work.load(self.config, unit["id"])
+        self.assertEqual(recovered["source"]["id"], "immutable-page-id")
+        for name in ("alpha", "beta"):
+            self.assertEqual(recovered["repos"][name]["branch"], "ENG-42-fix-cache-stale-entries")
+            self.assertEqual(git(work.location(self.config, unit["id"], name), "branch", "--show-current"),
+                             "ENG-42-fix-cache-stale-entries")
+        self.assertIn("- Key: ENG-42\n", (work.location(self.config, unit["id"]) / "AGENTS.md").read_text())
+
+    def test_existing_branches_survive_a_source_key(self):
+        unit = self.unit()
+        branch = unit["repos"]["alpha"]["branch"]
+        unit["source"]["key"] = "ENG-42"
+        work.persist(self.config, unit)
+        work.prepare(self.config, unit["id"])
+        self.assertEqual(work.load(self.config, unit["id"])["repos"]["alpha"]["branch"], branch)
+        self.assertEqual(git(work.location(self.config, unit["id"], "alpha"), "branch", "--show-current"), branch)
+
+    def test_invalid_source_keys_cannot_name_branches(self):
+        for key in ("--output=outside", "../outside", "ENG-42/other", "ENG 42"):
+            with self.subTest(key=key), self.assertRaises(HubError):
+                work.create(self.config, "Task", "Improve a fixture", ["alpha"],
+                            "Check fixture content", source={"key": key})
+
+    def test_execution_records_are_ignored_without_duplicate_handoffs(self):
+        unit = self.unit()
+        root = work.record_path(self.config, unit["id"]).parent
+        write(work.location(self.config, unit["id"]) / "outcome.md", "Reviewed fixture result")
+        work.report(self.config, unit["id"], "Reviewed fixture", "Operator checked fixture")
+        self.assertEqual({p.name for p in root.iterdir()}, {"unit.json"})
+        self.assertEqual(git(self.instance, "check-ignore", "work/" + unit["id"] + "/unit.json"),
+                         "work/" + unit["id"] + "/unit.json")
+        git(self.instance, "add", "--all")
+        self.assertEqual(git(self.instance, "ls-files", "work", ".hub"), "")
+        self.assertEqual(work.load(Config(self.instance), unit["id"])["status"], "review")
+
     def test_worker_partial_sources_require_context(self):
         unit = self.unit([])
-        for source in ({"url": "https://example.com/tickets/42"}, {"id": "example-42"},
+        for source in ({"url": "https://example.com/tickets/42"}, {"id": "example-42"}, {"key": "ENG-42"},
                        {"provider": "example-tracker"},
                        {"provider": "manual", "url": "https://example.com/tickets/42"},
                        {"provider": None, "id": "example-42", "url": None}):

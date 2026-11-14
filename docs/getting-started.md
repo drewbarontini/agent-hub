@@ -80,8 +80,9 @@ and diagnose the host/runtime. Do not disable sandboxing to make the demo pass.
 
 ## Another machine
 
-Commit the Instance's intended configuration, Core lock, and appropriate durable
-work metadata to its independently owned repository. After cloning it elsewhere,
+Commit the Instance's intended configuration and Core lock to its independently
+owned repository. Keep execution metadata ignored and use the canonical work
+source for requirements, outcomes and verification. After cloning it elsewhere,
 run initialization from an available Core checkout against that existing Instance.
 Provide local overrides for repository paths, executable paths and overlays;
 bootstrap the repositories and regenerate the workspace. The pinned Core commit
