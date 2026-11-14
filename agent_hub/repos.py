@@ -202,6 +202,10 @@ def sandbox_probe_status(config, runtime="codex"):
     if (exit_code != 0 or checks.get("inside_write") is not True
             or not isinstance(blocked, list) or not blocked or any(item is not True for item in blocked)):
         return "unknown"
+    if runtime == "claude":
+        readable = checks.get("git_metadata_readable")
+        if not isinstance(readable, list) or not readable or any(item is not True for item in readable):
+            return "unknown"
     return "passed"
 
 
