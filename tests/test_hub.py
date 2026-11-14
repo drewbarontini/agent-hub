@@ -243,6 +243,16 @@ class HubTests(unittest.TestCase):
             "passed": False, "exit_code": 1,
             "checks": {"reason": "No native sandbox"}})
         self.assertEqual(repos.doctor(self.config)["agent_execution"]["last_sandbox_probe"]["status"], "blocked")
+        save(self.instance / ".hub/last-claude-sandbox-probe.json", {
+            "passed": True, "exit_code": 0,
+            "checks": {"inside_write": True, "outside_and_metadata_blocked": [True],
+                       "git_metadata_readable": [True]}})
+        self.assertEqual(repos.sandbox_probe_status(self.config, "claude"), "passed")
+        save(self.instance / ".hub/last-claude-sandbox-probe.json", {
+            "passed": True, "exit_code": 0,
+            "checks": {"inside_write": True, "outside_and_metadata_blocked": [True],
+                       "git_metadata_readable": [False]}})
+        self.assertEqual(repos.sandbox_probe_status(self.config, "claude"), "unknown")
 
     def test_worktree_preserves_original(self):
         unit = self.unit()
