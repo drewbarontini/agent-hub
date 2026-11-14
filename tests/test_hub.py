@@ -227,7 +227,7 @@ class HubTests(unittest.TestCase):
         path.mkdir()
         self.assertEqual(repos.doctor(self.config)["agent_execution"]["last_sandbox_probe"]["status"], "unknown")
 
-    def test_doctor_claude_has_no_launch_adapter(self):
+    def test_doctor_claude_adapter_has_independent_probe_status(self):
         save(self.instance / ".hub/last-sandbox-probe.json", {
             "passed": True, "exit_code": 0,
             "checks": {"inside_write": True, "outside_and_metadata_blocked": [True]}})
@@ -236,9 +236,13 @@ class HubTests(unittest.TestCase):
             result = repos.doctor(self.config)
         self.assertTrue(result["ready"])
         self.assertEqual(result["agent_execution"]["runtime"], "claude")
-        self.assertFalse(result["agent_execution"]["launch_adapter_implemented"])
-        self.assertEqual(result["agent_execution"]["last_sandbox_probe"], {"runtime": "codex", "status": "passed"})
+        self.assertTrue(result["agent_execution"]["launch_adapter_implemented"])
+        self.assertEqual(result["agent_execution"]["last_sandbox_probe"], {"runtime": "claude", "status": "not-probed"})
         self.assertEqual(result["agent_execution"]["worker_execution"], "unverified")
+        save(self.instance / ".hub/last-claude-sandbox-probe.json", {
+            "passed": False, "exit_code": 1,
+            "checks": {"reason": "No native sandbox"}})
+        self.assertEqual(repos.doctor(self.config)["agent_execution"]["last_sandbox_probe"]["status"], "blocked")
 
     def test_worktree_preserves_original(self):
         unit = self.unit()
@@ -455,10 +459,70 @@ class HubTests(unittest.TestCase):
     def test_orchestrator_read_only(self):
         self.assertIn("read-only", agents.plan(self.config, "orchestrator")["permissions"])
 
-    def test_claude_not_claimed_implemented(self):
+    def test_claude_orchestrator_plan_keeps_native_permissions(self):
         self.config.runtime = "claude"
-        with self.assertRaises(HubError):
-            agents.plan(self.config, "orchestrator")
+        with patch("agent_hub.claude_adapter.binary", return_value="claude"):
+            result = agents.plan(self.config, "orchestrator")
+        self.assertEqual(result["role"], "orchestrator")
+        self.assertEqual(result["cwd"], str(self.instance))
+        self.assertIn("plan", result["command"])
+        self.assertIn("--tools", result["command"])
+        self.assertNotIn("bypassPermissions", result["command"])
+        self.assertNotIn("dangerously-skip-permissions", result["command"])
+
+    def test_claude_worker_plan_is_restricted_and_no_unsandboxed_retry(self):
+        unit = self.unit()
+        self.config.runtime = "claude"
+        with patch("agent_hub.claude_adapter.binary", return_value="claude"):
+            result = agents.plan(self.config, "worker", unit["id"])
+        command = result["command"]
+        self.assertIn("--restricted", command)
+        self.assertIn("dontAsk", command)
+        self.assertNotIn("--add-dir", command)
+        self.assertIn("--disallowedTools", command)
+        settings = json.loads(command[command.index("--settings") + 1])
+        self.assertTrue(settings["sandbox"]["enabled"])
+        self.assertTrue(settings["sandbox"]["failIfUnavailable"])
+        self.assertFalse(settings["sandbox"]["allowUnsandboxedCommands"])
+        self.assertTrue(settings["permissions"]["blockWritesOutsideWorkingDirectories"])
+        self.assertIn(str(work.location(self.config, unit["id"], "alpha") / ".git"),
+                      settings["sandbox"]["filesystem"]["denyWrite"])
+
+    def test_claude_worker_launch_fails_closed_without_probe(self):
+        unit = self.unit()
+        self.config.runtime = "claude"
+        with patch("agent_hub.claude_adapter.binary", return_value="claude"), patch(
+                "agent_hub.claude_adapter.sandbox_probe", return_value={"passed": False}), patch(
+                "agent_hub.agents.execute") as execute:
+            with self.assertRaises(HubError):
+                agents.launch(self.config, "worker", unit["id"])
+            execute.assert_not_called()
+        self.assertFalse(work.load(self.config, unit["id"])["sessions"])
+
+    def test_claude_probe_without_native_execution_cannot_pass(self):
+        unit = self.unit()
+        self.config.runtime = "claude"
+        with patch("agent_hub.claude_adapter.binary", return_value="claude"), patch(
+                "agent_hub.claude_adapter.subprocess.run",
+                return_value=subprocess.CompletedProcess([], 0, stdout='{"result":"not a tool execution"}')):
+            report = agents.sandbox_probe(self.config, unit["id"])
+        self.assertFalse(report["passed"])
+        self.assertEqual(repos.sandbox_probe_status(self.config, "claude"), "blocked")
+        root = work.location(self.config, unit["id"])
+        self.assertEqual(list(root.glob(".hub-probe-*")), [])
+
+    def test_claude_session_records_provider_and_omits_payloads(self):
+        unit = self.unit()
+        self.config.runtime = "claude"
+        secret = "ghp_" + "z" * 40
+        with patch("agent_hub.claude_adapter.binary", return_value="claude"), patch(
+                "agent_hub.agents.sandbox_probe", return_value={"passed": True}), patch(
+                "agent_hub.agents.execute",
+                return_value=subprocess.CompletedProcess([], 0, stdout=json.dumps({"result": secret}), stderr=secret)):
+            result = agents.launch(self.config, "worker", unit["id"], noninteractive=True)
+        self.assertEqual(work.load(self.config, unit["id"])["sessions"][0]["runtime"], "claude")
+        self.assertNotIn(secret, Path(result["log"]).read_text())
+        self.assertIn("exit_code", Path(result["log"]).read_text())
 
     def test_session_and_handoff_survive_agent_exit(self):
         unit = self.unit()
