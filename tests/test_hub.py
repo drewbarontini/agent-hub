@@ -464,7 +464,7 @@ class HubTests(unittest.TestCase):
         with patch("agent_hub.claude_adapter.binary", return_value="claude"):
             result = agents.plan(self.config, "orchestrator")
         self.assertEqual(result["role"], "orchestrator")
-        self.assertEqual(result["cwd"], str(self.instance))
+        self.assertEqual(Path(result["cwd"]).resolve(), self.instance.resolve())
         self.assertIn("plan", result["command"])
         self.assertIn("--tools", result["command"])
         self.assertNotIn("bypassPermissions", result["command"])
