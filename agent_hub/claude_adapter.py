@@ -148,10 +148,11 @@ def sandbox_probe(config, identifier):
     protected = [str(outside)] + [str(location(config, identifier, name) / ".git") for name in unit["repos"]]
     protected += [str(Path(git(location(config, identifier, name), "rev-parse", "--path-format=absolute", "--git-common-dir")) / "HEAD") for name in unit["repos"]]
     source = (
-        "import errno,json,pathlib\n"
+        "import errno,json,pathlib,subprocess\n"
         f"marker=pathlib.Path({str(marker)!r})\n"
         f"result=pathlib.Path({str(output)!r})\n"
         f"paths={protected!r}\n"
+        f"worktrees={[str(location(config, identifier, name)) for name in unit['repos']]!r}\n"
         "marker.write_text('inside')\n"
         "inside=marker.read_text()=='inside'\n"
         "marker.unlink()\n"
@@ -162,7 +163,13 @@ def sandbox_probe(config, identifier):
         "  blocked.append(False)\n"
         " except OSError as exc:\n"
         "  blocked.append(exc.errno in (errno.EACCES,errno.EPERM,errno.EROFS))\n"
-        "result.write_text(json.dumps({'inside_write':inside,'outside_and_metadata_blocked':blocked}))\n"
+        "readable=[]\n"
+        "for path in worktrees:\n"
+        " try:\n"
+        "  check=subprocess.run(['git','-C',path,'log','-1','--format=%H'],capture_output=True,text=True,timeout=10)\n"
+        "  readable.append(check.returncode==0 and len(check.stdout.strip())==40)\n"
+        " except (OSError,subprocess.TimeoutExpired): readable.append(False)\n"
+        "result.write_text(json.dumps({'inside_write':inside,'outside_and_metadata_blocked':blocked,'git_metadata_readable':readable}))\n"
     )
     write(script, source)
     passed = False
@@ -185,8 +192,11 @@ def sandbox_probe(config, identifier):
             try:
                 data = json.loads(output.read_text())
                 blocked = data.get("outside_and_metadata_blocked")
+                readable = data.get("git_metadata_readable")
                 passed = (data.get("inside_write") is True and isinstance(blocked, list)
                           and len(blocked) == len(protected) and all(v is True for v in blocked)
+                          and isinstance(readable, list) and len(readable) == len(unit["repos"])
+                          and all(v is True for v in readable)
                           and outside.read_text() == "untouched\n")
                 detail = data if passed else {"reason": "Native boundary probe checks did not pass"}
             except (OSError, ValueError, AttributeError):
