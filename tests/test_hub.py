@@ -503,7 +503,7 @@ class HubTests(unittest.TestCase):
         unit = self.unit()
         self.config.runtime = "claude"
         with patch("agent_hub.claude_adapter.binary", return_value="claude"), patch(
-                "agent_hub.claude_adapter.subprocess.run",
+                "agent_hub.claude_adapter.execute",
                 return_value=subprocess.CompletedProcess([], 0, stdout='{"result":"not a tool execution"}')):
             report = agents.sandbox_probe(self.config, unit["id"])
         self.assertFalse(report["passed"])
