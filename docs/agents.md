@@ -78,23 +78,57 @@ Workers write `outcome.md` inside their execution directory. `work report` impor
 that outcome and records the operator's reviewed summary and verification evidence.
 The command labels this evidence as operator-reported, not executed by Hub.
 
-## Claude and mixed configurations
+## Claude Code
 
-`agent.runtime = "claude"` is recognized, and diagnostics can check CLI presence.
-The launch command refuses it explicitly: v0.1 has no tested Claude launch adapter.
-Shared `AGENTS.md` rules and a `CLAUDE.md` import provide an instruction compatibility
-path, not equivalent permissions, hooks, skills, MCP configuration or sessions.
+Claude Code now has a **native CLI adapter**; it does not emulate Codex flags.
+Set `[agent] runtime = "claude"` and make the `claude` executable available.
+Version **2.1.314+** is required by the Worker file-tool boundary. The current
+adapter has not been tested with an authenticated live Claude Code session or
+validated on a supported host.
 
-Before using an existing Claude Hub, validate its native instruction discovery,
-permission hooks (including shell writes), sessions, skills and MCP access against
-the worktree and cleanup acceptance criteria. Keep its working runtime while
-reconciling. Mixed-provider operation is future work; do not substitute Codex
-configuration for native Claude configuration.
+`agent orchestrator` uses Claude's native `plan` permission mode and built-in
+read tools. External MCP/connector permissions remain governed by Claude and
+the user's configured access, so do not claim that Board, Memory, or Docs
+connectivity exists merely because it appears in Hub configuration.
 
-Sources:
+`agent worker <id>` constructs an isolated work-unit launch using Claude's
+`--restricted` mode, explicitly selected tools, `dontAsk`, and session
+settings requiring sandbox startup. Native command sandboxing denies unsandboxed
+retries, disallows command network access, and protects Git metadata. Native
+file tools use Claude's working-directory restrictions and explicit Edit denials
+for instruction files, provider configuration and Git metadata. Linked worktrees
+receive read access to their validated shared Git directories, but those locations
+remain write-denied. A native Bash probe also checks read-only Git access;
+permission-rule enforcement must still be verified in an authenticated Claude
+session. Worker MCP tools and web
+tools are excluded; do not assume an external Notion/Linear reference or skill
+repository can be accessed from this restricted session. Supply bounded local
+context only where the authorized workflow permits it. Native skills/hooks and
+other provider extensions require separate validation; this adapter is not yet
+feature parity with an established Claude development environment.
 
-- [Codex permission profiles](https://learn.chatgpt.com/docs/permissions)
-- [Codex CLI reference](https://learn.chatgpt.com/docs/cli/reference)
-- [Claude project instructions and imports](https://code.claude.com/docs/en/memory)
-- [Claude hooks](https://code.claude.com/docs/en/hooks)
+Run `sandbox-check <id>` before attempting a Worker launch. Unlike Codex's
+model-free command probe, Claude currently requires a **model-assisted probe**
+to execute a disposable script with its Bash tool, so this may incur API or
+subscription usage. The probe demands positive evidence that a disposable file
+can be written inside the work unit and that specific outside and Git metadata
+write opens are blocked. An absent report, denied tool call, unavailable sandbox,
+or ambiguous result **fails closed**. Worker `--launch` runs a fresh probe and
+refuses execution on failure; it does not fall back to unrestricted execution.
+The saved probe is historical and never proves that every filesystem path,
+credential, or native extension is isolated.
 
+Noninteractive Claude Worker runs use print mode and persist only exit status
+and known event types, not output payloads. Session status still records the
+actual selected runtime; implementation outcome and canonical work-source
+updates remain separate from process success.
+
+**Mixed-provider operation is not implemented** within one Instance session.
+An Instance selects one runtime. Configure different Instances independently,
+or adopt provider changes deliberately after validation.
+
+Provider references:
+- [Claude Code CLI](https://code.claude.com/docs/en/cli-reference)
+- [Claude sandbox](https://code.claude.com/docs/en/sandboxing)
+- [Claude permission rules](https://code.claude.com/docs/en/permissions)
+- [Claude project instructions](https://code.claude.com/docs/en/memory)

@@ -10,6 +10,7 @@ import tomllib
 from pathlib import Path
 
 from .common import HubError, git, run, save, write
+from . import claude_adapter
 from .evolution import refresh_instructions
 from .repos import executable
 from .work import load, location, mutation, now, persist, validate_tree
@@ -61,6 +62,8 @@ def permission_args(config, role, root, unit=None):
 
 
 def sandbox_probe(config, identifier):
+    if config.runtime == "claude":
+        return claude_adapter.sandbox_probe(config, identifier)
     """Execute no model calls and touch only disposable Hub-owned sentinel files."""
     unit = load(config, identifier)
     root = location(config, identifier)
@@ -103,8 +106,8 @@ def sandbox_probe(config, identifier):
 
 
 def plan(config, role, identifier=None):
-    if config.runtime != "codex":
-        raise HubError("Claude launch is not implemented/tested; see docs/agents.md for the compatibility path")
+    if config.runtime == "claude":
+        return claude_adapter.plan(config, role, identifier)
     binary = executable(config, "codex")
     if not binary:
         raise HubError("Codex executable missing; install the CLI or set tools.codex in local.toml")
@@ -136,15 +139,18 @@ def launch(config, role, identifier=None, noninteractive=False):
     if role == "worker" and not sandbox_probe(config, identifier)["passed"]:
         raise HubError("Worker launch blocked: sandbox probe failed; no unsandboxed fallback. See .hub/last-sandbox-probe.json")
     if noninteractive:
-        # Subcommand-specific options precede the final prompt.
-        command = command[:-1] + ["exec", "--ignore-user-config", "--json", command[-1]]
+        if config.runtime == "claude":
+            command = command[:-1] + ["--print", "--output-format", "json", "--permission-prompts", "none", command[-1]]
+        else:
+            # Subcommand-specific options precede the final prompt.
+            command = command[:-1] + ["exec", "--ignore-user-config", "--json", command[-1]]
     session_id = uuid.uuid4().hex
     if role == "worker":
         with mutation(config):
             unit = load(config, identifier)
             if any(s["status"] == "running" for s in unit["sessions"]):
                 raise HubError("This work unit already has an active session")
-            unit["sessions"].append({"id": session_id, "runtime": "codex", "status": "running", "started_at": now()})
+            unit["sessions"].append({"id": session_id, "runtime": config.runtime, "status": "running", "started_at": now()})
             persist(config, unit)
     log = config.root / ".hub/session-logs" / (session_id + ".jsonl")
     exit_code = None

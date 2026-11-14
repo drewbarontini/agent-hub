@@ -179,9 +179,12 @@ def resources(config):
     return rows
 
 
-def sandbox_probe_status(config):
+def sandbox_probe_status(config, runtime="codex"):
     """Summarize saved local sandbox evidence without executing a provider."""
-    path = config.root / ".hub/last-sandbox-probe.json"
+    if runtime not in {"codex", "claude"}:
+        raise HubError("Unknown runtime for sandbox probe")
+    filename = "last-claude-sandbox-probe.json" if runtime == "claude" else "last-sandbox-probe.json"
+    path = config.root / ".hub" / filename
     try:
         report = json.loads(path.read_text(encoding="utf-8"))
     except FileNotFoundError:
@@ -199,6 +202,10 @@ def sandbox_probe_status(config):
     if (exit_code != 0 or checks.get("inside_write") is not True
             or not isinstance(blocked, list) or not blocked or any(item is not True for item in blocked)):
         return "unknown"
+    if runtime == "claude":
+        readable = checks.get("git_metadata_readable")
+        if not isinstance(readable, list) or not readable or any(item is not True for item in readable):
+            return "unknown"
     return "passed"
 
 
@@ -223,7 +230,7 @@ def doctor(config):
     return {"ready": all(x["ok"] for x in checks if x.get("required", True)), "checks": checks,
             "agent_execution": {
                 "runtime": config.runtime,
-                "launch_adapter_implemented": config.runtime == "codex",
-                "last_sandbox_probe": {"runtime": "codex", "status": sandbox_probe_status(config)},
+                "launch_adapter_implemented": config.runtime in {"codex", "claude"},
+                "last_sandbox_probe": {"runtime": config.runtime, "status": sandbox_probe_status(config, config.runtime)},
                 "worker_execution": "unverified"},
             "authentication": "Not inferred from executable presence; verify in the selected runtime"}

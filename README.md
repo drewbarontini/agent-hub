@@ -107,7 +107,7 @@ not a work unit.
 | Multi-repository worktrees, cleanup checks, optional branch hooks | Implemented and tested with disposable repositories |
 | Codex launch plans, leases and outcome handoffs | Implemented; real launch requires supported Codex permissions and host sandbox |
 | Codex filesystem enforcement on this development host | Nested sandbox creation is blocked; native CLI end-to-end execution is unverified here |
-| Claude / mixed providers | Instruction compatibility documented; launch adapter not implemented |
+| Claude Code | Native Orchestrator/Worker launch plans and fail-closed Worker probe implemented; real Claude sessions and sandbox enforcement not yet verified |
 | Linear, Notion, GitHub work providers and MCP connectivity | References only; no authenticated connectors implemented |
 | Editor layout, conversation synchronization | Manual layout; no cross-machine session synchronization |
 
