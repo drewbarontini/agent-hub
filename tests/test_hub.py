@@ -487,6 +487,19 @@ class HubTests(unittest.TestCase):
         self.assertTrue(settings["permissions"]["blockWritesOutsideWorkingDirectories"])
         self.assertIn(str(work.location(self.config, unit["id"], "alpha") / ".git"),
                       settings["sandbox"]["filesystem"]["denyWrite"])
+        root = work.location(self.config, unit["id"])
+        path = root / "alpha"
+        common = Path(git(path, "rev-parse", "--path-format=absolute", "--git-common-dir")).resolve()
+        self.assertIn(str(common), settings["permissions"]["additionalDirectories"])
+        self.assertIn(str(common), settings["sandbox"]["filesystem"]["denyWrite"])
+        self.assertTrue(settings["permissions"]["blockReadsOutsideWorkingDirectories"])
+        for target in (root / "AGENTS.md", root / "CLAUDE.md",
+                       path / "AGENTS.md", path / "CLAUDE.md", path / ".git",
+                       path / ".mcp.json", path / ".claude", common):
+            rule = "Edit(//" + target.resolve().as_posix().lstrip("/") + ")"
+            self.assertIn(rule, settings["permissions"]["deny"])
+            self.assertIn(rule[:-1] + "/**)", settings["permissions"]["deny"])
+        self.assertNotIn("Write", settings["permissions"]["deny"])
 
     def test_claude_worker_launch_fails_closed_without_probe(self):
         unit = self.unit()
