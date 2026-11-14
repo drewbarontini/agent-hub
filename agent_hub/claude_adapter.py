@@ -24,6 +24,11 @@ from .work import load, location, validate_tree
 MIN_VERSION = (2, 1, 314)
 
 
+# Narrow execution seam: tests can stub Claude without replacing Git subprocess calls.
+def execute(command, **kwargs):
+    return subprocess.run(command, **kwargs)
+
+
 def binary(config):
     tool = executable(config, "claude")
     if not tool:
@@ -153,7 +158,7 @@ def sandbox_probe(config, identifier):
                    "Use the Bash tool to execute exactly this command once, then stop: "
                    + shlex.quote(sys.executable) + " " + shlex.quote(str(script))]
         try:
-            result = subprocess.run(command, cwd=root, capture_output=True, text=True, timeout=180)
+            result = execute(command, cwd=root, capture_output=True, text=True, timeout=180)
             code = result.returncode
         except (OSError, subprocess.TimeoutExpired):
             code = 1
