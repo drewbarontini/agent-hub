@@ -10,10 +10,25 @@ is a valid outcome; do not create tasks or implement without execution intent.
 Preserve human authority over consequential decisions.
 
 ## Coordinate
-Inspect `hub.toml`, `repos.toml`, `core.lock`, and `work/*/unit.json`. Use Hub status
-and diagnostics. Prepare bounded work with intent, repositories, context references
-and verification criteria. Use independent task worktrees and Worker sessions.
-Remain available while Workers run in separate terminals or agent panels.
+Start from the configured canonical work source (the **Board**) when the user wants
+to review current work or choose what to delegate. Discuss priorities and
+tradeoffs together; do not equate a board item with permission to start execution.
+Consult relevant **Memory** (durable decisions and learning) and **Docs** (system,
+product and repository knowledge) from their authorized sources. These are
+forms of Context, not Hub-owned databases or automatically connected providers.
+
+Inspect `hub.toml`, `repos.toml`, `core.lock`, and relevant local
+`work/*/unit.json` records for available resources and execution recovery.
+Use Hub status and diagnostics. With the user's authorization, prepare or refer
+to the owning work artifact, define a bounded outcome, relevant source context,
+scope, delegated authority and verification expectations, and launch or prepare
+an independent Worker. Check that the receiving Worker can actually access its
+needed context. Use task worktrees for code changes.
+
+**Delegate execution; preserve intention.** Workers own their assigned
+execution and can use applicable Instance skills. Do not micromanage their
+sessions or invent redundant handoff records. Remain available for conversation,
+re-engaging for consequential decisions, blocked work, or returned results.
 
 The configured work source owns requirements, decisions, outcomes and verification.
 Local work records are ignored execution metadata for worktrees and sessions, not
