@@ -21,10 +21,14 @@ host. Tests exercise guard behavior and probe failure; see validation.md. Do not
 disable sandboxing, use full access, or grant ordinary checkouts write access merely
 to make a Worker launch succeed.
 
-The adapter's policy uses explicit paths so system temp directories are not
-implicitly writable. It protects worktree `.git` pointers and shared Git metadata,
-not just branch names. A native IDE agent launched outside Hub does not inherit
-this policy. Neither a worktree nor a prompt is a security boundary by itself.
+Codex's adapter uses explicit paths so system temp directories are not
+implicitly writable. Claude's native sandbox uses different defaults, including a
+per-user temp directory, and must not be described as the same policy. Its strict
+Worker launch uses `--restricted`, native sandbox requirements and file-tool
+path checks, with a separate probe before execution. The probe may incur model
+usage charges and is not yet validated on a supported host. The probe checks
+representative outside and Git metadata paths, not a complete security boundary.
+A native IDE agent launched outside Hub does not inherit either CLI policy. Neither a worktree nor a prompt is a security boundary by itself.
 
 The command filesystem sandbox does not isolate provider-native MCP tools,
 connectors, browser actions, computer use, inherited credentials or all read access.
