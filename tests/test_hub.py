@@ -177,7 +177,7 @@ class HubTests(unittest.TestCase):
         self.assertIn("Knowledge (Memory / Docs)", text)
         self.assertIn("requires provider authentication", text)
         self.assertIn("local path missing", text)
-        self.assertNotIn("https://example.org/tasks", text)
+        self.assertIn("https://example.org/tasks", text)
         self.assertTrue((self.instance / ".hub/context/resources.md").exists())
         self.assertEqual(before, git(self.repo, "status", "--porcelain", "--untracked-files=all"))
         self.assertFalse((self.instance / "CONTEXT.md").exists())
