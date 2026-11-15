@@ -163,14 +163,14 @@ class HubTests(unittest.TestCase):
 
     def test_context_index_reads_registry_without_fetching_external_sources(self):
         with (self.instance / "hub.toml").open("a") as stream:
-            stream.write('\\n[[resources]]\\nname="board"\\nkind="work"\\nlocation="https://example.org/tasks"\\npurpose="Current decisions"\\n')
-            stream.write('\\n[[resources]]\\nname="notes"\\nkind="context"\\npath="../missing-notes"\\npurpose="Learning and docs"\\n')
+            stream.write('\n[[resources]]\nname="board"\nkind="work"\nlocation="https://example.org/tasks"\npurpose="Current decisions"\n')
+            stream.write('\n[[resources]]\nname="notes"\nkind="context"\npath="../missing-notes"\npurpose="Learning and docs"\n')
         self.config = Config(self.instance)
         before = git(self.repo, "status", "--porcelain", "--untracked-files=all")
         summary = context.catalog(self.config)
         self.assertEqual(summary["board"][0]["name"], "board")
         self.assertEqual(summary["knowledge"][0]["name"], "notes")
-        self.assertNotIn("connected", str(summary["board"][0]["connectivity"]).lower().replace("not verified", ""))
+        self.assertIn("unsupported", summary["board"][0]["connectivity"])
         result = context.write_index(self.config)
         text = Path(result["index"]).read_text()
         self.assertIn("Board", text)
@@ -192,7 +192,7 @@ class HubTests(unittest.TestCase):
             for i in range(27)
         }
         pages = context.render(self.config)
-        self.assertIn("6 of 27", pages["CONTEXT.md"].replace("27 of 27", "6 of 27"))
+        self.assertIn("27 of 27", pages["CONTEXT.md"])
         self.assertIn("context/repositories-2.md", pages)
         self.assertLess(len(pages["CONTEXT.md"].splitlines()), 65)
         saved = context.write_index(self.config)
@@ -205,14 +205,14 @@ class HubTests(unittest.TestCase):
 
     def test_registered_capability_inventory_exact_overlap_and_scope(self):
         beta = repository(self.root / "beta")
-        write(self.repo / "AGENTS.md", "COMMON GUIDANCE\\n")
-        write(beta / "AGENTS.md", "COMMON GUIDANCE\\n")
-        write(self.repo / ".agents/skills/local/SKILL.md", "local skill\\n")
-        write(beta / ".agents/skills/local/SKILL.md", "different skill\\n")
-        write(beta / "private/secret.txt", "NEVER READ THIS\\n")
+        write(self.repo / "AGENTS.md", "COMMON GUIDANCE\n")
+        write(beta / "AGENTS.md", "COMMON GUIDANCE\n")
+        write(self.repo / ".agents/skills/local/SKILL.md", "local skill\n")
+        write(beta / ".agents/skills/local/SKILL.md", "different skill\n")
+        write(beta / "private/secret.txt", "NEVER READ THIS\n")
         self.register(
-            '[[repos]]\\nname="alpha"\\nremote="https://github.com/example/alpha.git"\\n'
-            '[[repos]]\\nname="beta"\\nremote="https://github.com/example/beta.git"\\n'
+            '[[repos]]\nname="alpha"\nremote="https://github.com/example/alpha.git"\n'
+            '[[repos]]\nname="beta"\nremote="https://github.com/example/beta.git"\n'
         )
         before = (git(self.repo, "status", "--porcelain"), git(beta, "status", "--porcelain"))
         rows = context.inventory(self.config, ["alpha", "beta"])
@@ -231,10 +231,10 @@ class HubTests(unittest.TestCase):
 
     def test_inventory_skips_symlinks_and_unavailable_repos(self):
         outside = self.root / "outside.md"
-        write(outside, "sensitive material\\n")
+        write(outside, "sensitive material\n")
         (self.repo / "AGENTS.md").symlink_to(outside)
         self.register(self.instance.joinpath("repos.toml").read_text() +
-                      '[[repos]]\\nname="missing"\\nremote="https://github.com/example/missing.git"\\n')
+                      '[[repos]]\nname="missing"\nremote="https://github.com/example/missing.git"\n')
         report = context.inventory(self.config)
         self.assertFalse(any(x["path"] == "AGENTS.md" for x in report["items"]))
         self.assertEqual(report["unavailable_or_unreadable"][0]["repository"], "missing")
