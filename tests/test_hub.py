@@ -84,6 +84,25 @@ class HubTests(unittest.TestCase):
         self.assertFalse(result["created"])
         self.assertEqual(before, (self.instance / "repos.toml").read_bytes())
 
+    def test_instance_launcher_works_from_session_path(self):
+        launcher = self.instance / ".hub/bin/hub"
+        self.assertTrue(launcher.is_symlink())
+        env = dict(os.environ)
+        env["PATH"] = str(launcher.parent) + os.pathsep + env.get("PATH", "")
+        if not shutil.which("python3", path=env["PATH"]):
+            self.skipTest("No python3 available for env shebang")
+        check = subprocess.run(
+            ["python3", "-c", "import sys; sys.exit(sys.version_info < (3, 11))"],
+            cwd=self.instance, env=env, capture_output=True, text=True)
+        if check.returncode != 0:
+            self.skipTest("python3 on PATH is older than 3.11")
+        result = subprocess.run(
+            ["hub", "config-check"], cwd=self.instance, env=env,
+            capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(json.loads(result.stdout)["valid"])
+        self.assertEqual(json.loads(result.stdout)["repositories"], 1)
+
     def test_init_nonempty_refused(self):
         p = self.root / "existing"
         p.mkdir()

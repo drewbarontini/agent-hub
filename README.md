@@ -36,11 +36,11 @@ know), and available capabilities. It is a *navigation aid*, not another registr
 a copy of source material, or evidence that a service is authenticated.
 
 ```sh
-# In an initialized Instance using its pinned Core
-python3.13 .hub/bin/hub context --write
-python3.13 .hub/bin/hub context --section resources
-python3.13 .hub/bin/hub context --section repositories
-python3.13 .hub/bin/hub inventory --repo example
+# From an initialized Instance after the session PATH setup below
+hub context --write
+hub context --section resources
+hub context --section repositories
+hub inventory --repo example
 ```
 
 The index starts short and links to generated detail pages as the collection grows.
@@ -53,7 +53,14 @@ See [Context navigation](docs/context-navigation.md).
 
 Requirements: Python **3.11+**, Git **2.31+**, and macOS or Linux. VS Code and Codex
 are needed for the agent workspace experience. On machines whose `python3` is
-older, use an explicit executable such as `python3.13` in these commands.
+older, use an explicit executable such as `python3.13` for initialization.
+The generated `.hub/bin/hub` is already executable and uses `python3` in its
+shebang; concise `hub` commands work when that resolves to Python 3.11+ and the
+Instance launcher is on your shell's PATH. The `export PATH=...` step below affects only
+the current shell, not a global install. Repeat it for each new terminal and run
+commands from that Instance's root. If `python3` is too old, the explicit
+`python3.13 .hub/bin/hub ...` invocation remains supported. See
+[CLI invocation](docs/getting-started.md#use-the-instance-cli).
 
 ```sh
 git clone https://github.com/drewbarontini/agent-hub.git
@@ -77,10 +84,12 @@ For deterministic setup after reviewing your proposal:
 ```sh
 python3.13 bin/hub init ../my-hub --name my-hub --core-source . --ref HEAD
 cd ../my-hub
+# Expose this Instance's pinned launcher in the current shell only.
+export PATH="$PWD/.hub/bin:$PATH"
 # Configure hub.toml, repos.toml and ignored local.toml first.
-python3.13 .hub/bin/hub bootstrap
-python3.13 .hub/bin/hub workspace
-python3.13 .hub/bin/hub doctor
+hub bootstrap
+hub workspace
+hub doctor
 code .hub/hub.code-workspace
 ```
 
@@ -95,15 +104,16 @@ exploration. **Workers** execute bounded work in separate work-unit directories.
 The workspace is their environment, not another agent role.
 
 ```sh
-python3.13 .hub/bin/hub agent orchestrator --launch
-# In another terminal, from the Instance:
-python3.13 .hub/bin/hub work create --title "Inspect project" \
+hub agent orchestrator --launch
+# In another terminal, repeat the PATH setup from the Instance root first:
+export PATH="$PWD/.hub/bin:$PATH"
+hub work create --title "Inspect project" \
   --intent "Investigate the configured test command; change no application code" \
   --repo example --verify "Record the command and its actual result"
-python3.13 .hub/bin/hub work prepare W-REPLACE_WITH_ID
-python3.13 .hub/bin/hub sandbox-check W-REPLACE_WITH_ID
-python3.13 .hub/bin/hub agent worker W-REPLACE_WITH_ID --launch
-python3.13 .hub/bin/hub work report W-REPLACE_WITH_ID \
+hub work prepare W-REPLACE_WITH_ID
+hub sandbox-check W-REPLACE_WITH_ID
+hub agent worker W-REPLACE_WITH_ID --launch
+hub work report W-REPLACE_WITH_ID \
   --summary "Reviewed Worker outcome" --verification "Record evidence here"
 ```
 

@@ -6,10 +6,13 @@ belongs in Core.
 
 ## Adopt: Core → Instance
 
+The `hub` examples below assume you are in the initialized Instance with its
+local launcher on PATH (see [Instance CLI](getting-started.md#use-the-instance-cli)).
+
 From the Instance, inspect an explicit release/ref first:
 
 ```sh
-python3.13 .hub/bin/hub adopt --ref v0.1.1
+hub adopt --ref v0.1.1
 # During local development, also pass --source /approved/core-checkout.
 ```
 
@@ -20,8 +23,8 @@ target code runs in planning mode. Network access is needed for a remote source;
 credentials remain Git's responsibility. There is no automatic update polling.
 
 ```sh
-python3.13 .hub/bin/hub adopt --ref v0.1.1 --apply
-python3.13 .hub/bin/hub rollback
+hub adopt --ref v0.1.1 --apply
+hub rollback
 ```
 
 `--apply` authorizes candidate code execution: a separate detached checkout is
@@ -41,7 +44,7 @@ Start with authorization to inspect the existing Hub. Do not assume access to
 private organizational implementations. Inventory behavior without copying source:
 
 ```sh
-python3.13 .hub/bin/hub reconcile --inventory /approved/capabilities.toml
+hub reconcile --inventory /approved/capabilities.toml
 ```
 
 Use `templates/reconcile.toml`. The command reads only that supplied inventory and
@@ -81,7 +84,7 @@ OneDrive overlay. v0.1 does not perform that migration or claim private access.
 ## Promote: Instance → Core
 
 ```sh
-python3.13 .hub/bin/hub promote \
+hub promote \
   --problem "A general problem that is permitted to disclose" \
   --requirement "Reusable public behavior" --ownership unknown
 ```
