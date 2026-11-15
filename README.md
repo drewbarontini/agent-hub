@@ -56,7 +56,7 @@ are needed for the agent workspace experience. On machines whose `python3` is
 older, use an explicit executable such as `python3.13` for initialization.
 The generated `.hub/bin/hub` is already executable and uses `python3` in its
 shebang; concise `hub` commands work when that resolves to Python 3.11+ and the
-Instance launcher is on your shell's PATH. The `export PATH=...` above affects only
+Instance launcher is on your shell's PATH. The `export PATH=...` step below affects only
 the current shell, not a global install. Repeat it for each new terminal and run
 commands from that Instance's root. If `python3` is too old, the explicit
 `python3.13 .hub/bin/hub ...` invocation remains supported. See
@@ -105,7 +105,8 @@ The workspace is their environment, not another agent role.
 
 ```sh
 hub agent orchestrator --launch
-# In another terminal, from the Instance:
+# In another terminal, repeat the PATH setup from the Instance root first:
+export PATH="$PWD/.hub/bin:$PATH"
 hub work create --title "Inspect project" \
   --intent "Investigate the configured test command; change no application code" \
   --repo example --verify "Record the command and its actual result"
