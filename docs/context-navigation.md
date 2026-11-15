@@ -4,6 +4,10 @@ Agent Hub provides a **home for coordination**, not a new storage system. An Ins
 references authoritative work, learning, documentation, repositories, and capabilities.
 The Orchestrator should navigate only the context relevant to the current intention.
 
+Examples use the Instance's local `hub` launcher after the optional
+[session PATH setup](getting-started.md#use-the-instance-cli). They do not
+require a global installation.
+
 ## Index: Board, Memory, Docs, and capabilities
 
 The Workspace command generates an ignored local index at `.hub/CONTEXT.md`.
