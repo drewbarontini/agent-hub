@@ -1,17 +1,19 @@
 # Operations
 
-Run commands from the Instance using Python 3.11+:
+Run commands from an initialized Instance with its local `hub` launcher
+on your session PATH (see [Instance CLI](getting-started.md#use-the-instance-cli)).
+The launcher still requires Python 3.11+ as `python3`:
 
 ```sh
-python3.13 .hub/bin/hub status
-python3.13 .hub/bin/hub doctor
-python3.13 .hub/bin/hub resources
+hub status
+hub doctor
+hub resources
 ```
 
 ## Bounded work
 
 ```sh
-python3.13 .hub/bin/hub work create --title "Investigate test failures" \
+hub work create --title "Investigate test failures" \
   --intent "Find the cause; make only the necessary fix" \
   --repo frontend --repo backend --resource project-notes \
   --verify "Run relevant tests and describe remaining risks" \
@@ -42,9 +44,9 @@ do not install a connector or establish access in the receiving runtime.
 Prepare and inspect using the returned ID:
 
 ```sh
-python3.13 .hub/bin/hub work prepare W-REPLACE_WITH_ID
-python3.13 .hub/bin/hub work status W-REPLACE_WITH_ID
-python3.13 .hub/bin/hub agent worker W-REPLACE_WITH_ID
+hub work prepare W-REPLACE_WITH_ID
+hub work status W-REPLACE_WITH_ID
+hub agent worker W-REPLACE_WITH_ID
 ```
 
 Preparation branches from each registered local default branch's recorded commit.
@@ -62,7 +64,7 @@ policy. Hub does not merge or push automatically.
 After reviewing the result:
 
 ```sh
-python3.13 .hub/bin/hub work report W-REPLACE_WITH_ID \
+hub work report W-REPLACE_WITH_ID \
   --summary "Outcome against intent, open questions and next action" \
   --verification "Actual commands/results and any checks not run"
 ```
@@ -117,8 +119,8 @@ a successful canonical update.
 ## Conservative cleanup
 
 ```sh
-python3.13 .hub/bin/hub work cleanup W-REPLACE_WITH_ID
-python3.13 .hub/bin/hub work cleanup W-REPLACE_WITH_ID --apply
+hub work cleanup W-REPLACE_WITH_ID
+hub work cleanup W-REPLACE_WITH_ID --apply
 ```
 
 The first command is a dry run. Removal refuses changed tracked files, untracked
@@ -132,7 +134,7 @@ There is no force flag or automatic branch deletion.
 If a session was interrupted, first verify its processes have ended. Only then:
 
 ```sh
-python3.13 .hub/bin/hub work release W-REPLACE_WITH_ID \
+hub work release W-REPLACE_WITH_ID \
   --session SESSION_ID --ack-session-ended
 ```
 
@@ -146,8 +148,8 @@ are bypassable and do not protect direct file edits. See security.md before use.
 ## Services
 
 ```sh
-python3.13 .hub/bin/hub service web-dev
-python3.13 .hub/bin/hub service web-dev --run
+hub service web-dev
+hub service web-dev --run
 ```
 
 Services use explicit argument arrays, run in the foreground, inherit the operator's
