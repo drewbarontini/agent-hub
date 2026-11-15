@@ -115,7 +115,9 @@ def workspace(config):
             "extensions": {"recommendations": ["openai.chatgpt"]},
             "tasks": {"version": "2.0.0", "tasks": tasks}}
     write(target, json.dumps(data, indent=2) + "\n")
-    return {"workspace": str(target), "folders": [f["name"] for f in folders],
+    from .context import write_index
+    index = write_index(config)
+    return {"workspace": str(target), "context_index": index["index"], "folders": [f["name"] for f in folders],
             "layout": "Arrange sidebar and editor terminals manually; no agent session is auto-started"}
 
 
