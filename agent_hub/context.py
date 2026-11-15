@@ -42,7 +42,7 @@ def catalog(config, section="summary"):
         repositories.append({
             "name": entry["name"], "description": entry.get("description", ""),
             "available": diag["available"], "visible": entry["visible"],
-            "problem": diag["problem"],
+            "path": str(entry["path"]), "problem": diag["problem"],
         })
     diagnostics = {d["name"]: d for d in resources(config)}
     refs = [
@@ -79,6 +79,10 @@ def repo_line(item):
         state += ": " + label(item["problem"])
     purpose = label(item["description"])
     return "- **" + label(item["name"]) + "** — " + (purpose + "; " if purpose else "") + state
+
+
+def repo_detail_line(item):
+    return repo_line(item) + " — local path: " + label(item["path"])
 
 
 def render(config):
@@ -133,11 +137,11 @@ def render(config):
             page = i // PAGE_SIZE + 1
             files["context/repositories-" + str(page) + ".md"] = (
                 "# Repositories page " + str(page) + "\n\n" +
-                "\n".join(repo_line(row) for row in subset) + "\n")
+                "\n".join(repo_detail_line(row) for row in subset) + "\n")
             repo_index.append("- [Page " + str(page) + "](repositories-" + str(page) +
                               ".md): " + str(len(subset)) + " repositories")
         else:
-            repo_index.extend(repo_line(row) for row in subset)
+            repo_index.extend(repo_detail_line(row) for row in subset)
     files["context/repositories.md"] = "\n".join(repo_index) + "\n"
     return files
 
