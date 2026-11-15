@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_hub import agents, evolution, repos, security, work
+from agent_hub import agents, context, evolution, repos, security, work
 from agent_hub.cli import service
 from agent_hub.common import CORE, HubError, git, read_json, run, save, toml_string, write
 from agent_hub.config import Config
@@ -160,6 +160,85 @@ class HubTests(unittest.TestCase):
         self.assertEqual(data["tasks"]["tasks"][0]["type"], "process")
         self.assertIn(self.first, data["tasks"]["tasks"][0]["args"][0])
         self.assertIn("alpha", result["folders"])
+
+    def test_context_index_reads_registry_without_fetching_external_sources(self):
+        with (self.instance / "hub.toml").open("a") as stream:
+            stream.write('\\n[[resources]]\\nname="board"\\nkind="work"\\nlocation="https://example.org/tasks"\\npurpose="Current decisions"\\n')
+            stream.write('\\n[[resources]]\\nname="notes"\\nkind="context"\\npath="../missing-notes"\\npurpose="Learning and docs"\\n')
+        self.config = Config(self.instance)
+        before = git(self.repo, "status", "--porcelain", "--untracked-files=all")
+        summary = context.catalog(self.config)
+        self.assertEqual(summary["board"][0]["name"], "board")
+        self.assertEqual(summary["knowledge"][0]["name"], "notes")
+        self.assertNotIn("connected", str(summary["board"][0]["connectivity"]).lower().replace("not verified", ""))
+        result = context.write_index(self.config)
+        text = Path(result["index"]).read_text()
+        self.assertIn("Board", text)
+        self.assertIn("Knowledge (Memory / Docs)", text)
+        self.assertIn("requires provider authentication", text)
+        self.assertIn("local path missing", text)
+        self.assertNotIn("https://example.org/tasks", text)
+        self.assertTrue((self.instance / ".hub/context/resources.md").exists())
+        self.assertEqual(before, git(self.repo, "status", "--porcelain", "--untracked-files=all"))
+        self.assertFalse((self.instance / "CONTEXT.md").exists())
+        with self.assertRaises(HubError):
+            context.catalog(self.config, "../private")
+
+    def test_context_index_workspace_and_progressive_pages(self):
+        # Test stable pagination without multiplying real repositories.
+        base = dict(self.config.repos["alpha"])
+        self.config.repos = {
+            "alpha-" + str(i): dict(base, name="alpha-" + str(i), description="Repo " + str(i))
+            for i in range(27)
+        }
+        pages = context.render(self.config)
+        self.assertIn("6 of 27", pages["CONTEXT.md"].replace("27 of 27", "6 of 27"))
+        self.assertIn("context/repositories-2.md", pages)
+        self.assertLess(len(pages["CONTEXT.md"].splitlines()), 65)
+        saved = context.write_index(self.config)
+        self.assertEqual(saved["generated_files"], len(pages))
+        self.assertTrue((self.instance / ".hub/context/repositories-2.md").is_file())
+        result = repos.workspace(self.config)
+        self.assertTrue(Path(result["context_index"]).is_file())
+        self.assertIn(".hub/CONTEXT.md", str(Path(result["context_index"])))
+        self.assertFalse((self.instance / "context").exists())
+
+    def test_registered_capability_inventory_exact_overlap_and_scope(self):
+        beta = repository(self.root / "beta")
+        write(self.repo / "AGENTS.md", "COMMON GUIDANCE\\n")
+        write(beta / "AGENTS.md", "COMMON GUIDANCE\\n")
+        write(self.repo / ".agents/skills/local/SKILL.md", "local skill\\n")
+        write(beta / ".agents/skills/local/SKILL.md", "different skill\\n")
+        write(beta / "private/secret.txt", "NEVER READ THIS\\n")
+        self.register(
+            '[[repos]]\\nname="alpha"\\nremote="https://github.com/example/alpha.git"\\n'
+            '[[repos]]\\nname="beta"\\nremote="https://github.com/example/beta.git"\\n'
+        )
+        before = (git(self.repo, "status", "--porcelain"), git(beta, "status", "--porcelain"))
+        rows = context.inventory(self.config, ["alpha", "beta"])
+        agent_rows = [x for x in rows["items"] if x["path"] == "AGENTS.md"]
+        self.assertEqual(len(agent_rows), 2)
+        self.assertTrue(all(x["classification"] == "exact duplicate" for x in agent_rows))
+        skill_rows = [x for x in rows["items"] if x["path"].endswith("SKILL.md")]
+        self.assertTrue(all(x["classification"] == "name overlap (review only)" for x in skill_rows))
+        self.assertNotIn("NEVER READ THIS", str(rows))
+        self.assertNotIn("COMMON GUIDANCE", str(rows))
+        self.assertNotIn("_sha", str(rows))
+        self.assertEqual(before, (git(self.repo, "status", "--porcelain"), git(beta, "status", "--porcelain")))
+        self.assertEqual(context.inventory(self.config, ["alpha"])["scope"], ["alpha"])
+        with self.assertRaises(HubError):
+            context.inventory(self.config, ["not-registered"])
+
+    def test_inventory_skips_symlinks_and_unavailable_repos(self):
+        outside = self.root / "outside.md"
+        write(outside, "sensitive material\\n")
+        (self.repo / "AGENTS.md").symlink_to(outside)
+        self.register(self.instance.joinpath("repos.toml").read_text() +
+                      '[[repos]]\\nname="missing"\\nremote="https://github.com/example/missing.git"\\n')
+        report = context.inventory(self.config)
+        self.assertFalse(any(x["path"] == "AGENTS.md" for x in report["items"]))
+        self.assertEqual(report["unavailable_or_unreadable"][0]["repository"], "missing")
+        self.assertNotIn("sensitive material", str(report))
 
     def test_discovery_explicit_and_nonrecursive_inside_repo(self):
         write(self.repo / "private" / "do-not-read.md", "private")
