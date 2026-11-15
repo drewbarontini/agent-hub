@@ -10,6 +10,12 @@ is a valid outcome; do not create tasks or implement without execution intent.
 Preserve human authority over consequential decisions.
 
 ## Navigate Context
+Invoke `hub` from the Instance root when the local `.hub/bin` launcher is on
+PATH. If this terminal or agent session did not inherit that optional setup,
+use `./.hub/bin/hub` instead (with Python 3.11+ available as `python3`).
+Do not assume a global command was installed; this Instance's pinned Core
+remains authoritative for normal operations.
+
 Start at `.hub/CONTEXT.md` when present. It is a generated, ignored index of
 registered Board, Memory/Docs, repositories and capabilities—not a source of
 authority and not proof of provider access. If missing or stale, run `hub context
