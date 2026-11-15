@@ -31,6 +31,31 @@ Instance. Repeating initialization preserves its configuration and reinstalls a
 missing pinned Core. If interrupted during first initialization, inspect the
 partial directory and use a new empty destination; do not blindly erase it.
 
+### Use the Instance CLI
+
+The initializer creates an executable `.hub/bin/hub` launcher pointing to the
+Instance's **pinned Core**, not your editable Core checkout. From the initialized
+Instance root, expose it for **this shell session only**:
+
+```sh
+cd /approved/my-hub
+export PATH="$PWD/.hub/bin:$PATH"
+hub config-check
+```
+
+You can now use `hub bootstrap`, `hub workspace`, `hub doctor`,
+`hub context`, and other normal commands in that terminal. Repeat the
+`export` in each new shell; it does not edit shell profiles, install a global
+command, or change `core.lock`. If you switch Instances, switch to the target
+Instance and update PATH for that session. Run commands from the Instance root
+(or pass `--instance /approved/my-hub` before the command).
+
+The launcher starts via `#!/usr/bin/env python3`, so `python3` on PATH must
+be **3.11 or newer**. Without the PATH step, run `./.hub/bin/hub doctor` when
+that Python requirement is met. If `python3` is older or unavailable, use the
+explicit interpreter instead: `python3.13 .hub/bin/hub doctor` (or any
+installed Python 3.11+ executable). No package manager or new wrapper is needed.
+
 Edit `repos.toml`. Replace the empty `repos = []` with entries adapted from
 `templates/instance/repos.toml`. Use the actual origin and actual default branch.
 Names and folders need not match the remote's repository name. `checkout = true`
@@ -53,14 +78,14 @@ any of these files. Repositories can stay hidden from the Explorer with
 
 ## Verify and open
 
-From the Instance directory:
+From the Instance directory, after the session PATH step above:
 
 ```sh
-python3.13 .hub/bin/hub config-check
-python3.13 .hub/bin/hub bootstrap
-python3.13 .hub/bin/hub resources
-python3.13 .hub/bin/hub doctor
-python3.13 .hub/bin/hub workspace
+hub config-check
+hub bootstrap
+hub resources
+hub doctor
+hub workspace
 code .hub/hub.code-workspace
 ```
 
@@ -86,15 +111,15 @@ index is ignored and may be regenerated after changing `hub.toml` or
 `repos.toml`:
 
 ```sh
-python3.13 .hub/bin/hub context --write
-python3.13 .hub/bin/hub context --section resources
-python3.13 .hub/bin/hub context --section repositories
+hub context --write
+hub context --section resources
+hub context --section repositories
 ```
 
 For a read-only scan of registered instructions and skills:
 
 ```sh
-python3.13 .hub/bin/hub inventory --repo example
+hub inventory --repo example
 ```
 
 Only explicitly registered repositories are considered. No home-directory scan,
