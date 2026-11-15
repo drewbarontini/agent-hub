@@ -5,6 +5,7 @@ import hashlib
 import re
 from collections import defaultdict
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from .common import HubError, write
 from .repos import inspect, resources
@@ -17,6 +18,19 @@ MAX_SIZE = 256_000
 def label(value):
     """Make registry values inert, single-line Markdown."""
     return re.sub(r"[\r\n\t\[\]<>|]", " ", str(value or "")).strip().replace(chr(96), "'")
+
+
+def safe_reference(value):
+    """Do not reproduce URL credentials, query tokens or fragments in a generated map."""
+    text = str(value or "")
+    parsed = urlsplit(text)
+    if parsed.scheme in {"http", "https"}:
+        if parsed.username or parsed.password:
+            return "[URL credentials omitted]"
+        return urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    if "://" in text or len(text) > 240:
+        return "[unverified reference]"
+    return label(text)
 
 
 def catalog(config, section="summary"):
@@ -34,6 +48,8 @@ def catalog(config, section="summary"):
     refs = [
         {"name": item["name"], "kind": item["kind"],
          "purpose": item.get("purpose", ""), "usage": item.get("usage", ""),
+         "reference": safe_reference(config.path(item["path"]) if "path" in item
+                                     else item.get("location", "")),
          "availability": diagnostics[item["name"]]["availability"],
          "connectivity": diagnostics[item["name"]]["connectivity"]}
         for item in config.resources
@@ -53,7 +69,8 @@ def catalog(config, section="summary"):
 
 def resource_line(item):
     return ("- **" + label(item["name"]) + "** — " + (label(item["purpose"]) or "No purpose") +
-            "; " + label(item["availability"]) + "; connection: " + label(item["connectivity"]))
+            "; " + label(item["availability"]) + "; connection: " + label(item["connectivity"]) +
+            ("; source: " + label(item["reference"]) if item["reference"] else ""))
 
 
 def repo_line(item):
@@ -103,6 +120,8 @@ def render(config):
                     "- Purpose: " + label(x["purpose"]),
                     "- Availability: " + label(x["availability"]),
                     "- Connectivity: " + label(x["connectivity"])]
+        if x["reference"]:
+            details.append("- Source: " + label(x["reference"]))
         if x["usage"]:
             details.append("- Usage: " + label(x["usage"]))
         details.append("")
