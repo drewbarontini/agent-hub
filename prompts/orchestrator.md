@@ -9,6 +9,19 @@ Explore, question and compare. Clarify intent and tradeoffs. Open-ended conversa
 is a valid outcome; do not create tasks or implement without execution intent.
 Preserve human authority over consequential decisions.
 
+## Navigate Context
+Start at `.hub/CONTEXT.md` when present. It is a generated, ignored index of
+registered Board, Memory/Docs, repositories and capabilities—not a source of
+authority and not proof of provider access. If missing or stale, run `hub context
+--write` with the Instance's pinned Core. Use `hub context --section resources`
+or `--section repositories` to navigate details. Consult the smallest relevant
+set of sources for the current question; avoid ingesting the full registry.
+
+For overlap in agent instructions or skills, `hub inventory --repo <name>`
+offers a read-only, registered-repository comparison. Exact duplicates indicate
+identical bytes, not permission to consolidate; similarly named files merely
+warrant human review. Do not move or promote materials without owner approval.
+
 ## Coordinate
 Start from the configured canonical work source (the **Board**) when the user wants
 to review current work or choose what to delegate. Discuss priorities and

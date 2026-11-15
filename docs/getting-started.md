@@ -78,6 +78,28 @@ Create a small work unit, prepare it, run `sandbox-check`, and launch a Worker a
 shown in README.md. If the host cannot enforce the requested sandbox, stop there
 and diagnose the host/runtime. Do not disable sandboxing to make the demo pass.
 
+## Navigate without duplicating Context
+
+After generating the workspace, open `.hub/CONTEXT.md` for a concise map of the
+Instance's configured Board, Memory/Docs, repositories, and tools. The generated
+index is ignored and may be regenerated after changing `hub.toml` or
+`repos.toml`:
+
+```sh
+python3.13 .hub/bin/hub context --write
+python3.13 .hub/bin/hub context --section resources
+python3.13 .hub/bin/hub context --section repositories
+```
+
+For a read-only scan of registered instructions and skills:
+
+```sh
+python3.13 .hub/bin/hub inventory --repo example
+```
+
+Only explicitly registered repositories are considered. No home-directory scan,
+file migration, provider login, or remote syncing is performed.
+
 ## Another machine
 
 Commit the Instance's intended configuration and Core lock to its independently

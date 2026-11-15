@@ -10,7 +10,7 @@ from pathlib import Path
 from . import __version__
 from .common import CORE, HubError, git, redact, run, save, sanitize
 from .config import Config
-from . import agents, evolution, repos, security, work
+from . import agents, context, evolution, repos, security, work
 
 
 def parser():
@@ -30,6 +30,11 @@ def parser():
     q.add_argument("--depth", type=int, default=2)
     for name in ["config-check", "bootstrap", "status", "workspace", "doctor", "resources"]:
         commands.add_parser(name)
+    q = commands.add_parser("context", help="View or regenerate the Instance Context Index")
+    q.add_argument("--section", choices=["summary", "resources", "repositories"], default="summary")
+    q.add_argument("--write", action="store_true", help="Regenerate ignored navigation files under .hub/")
+    q = commands.add_parser("inventory", help="Inspect known instruction and skill files in registered repositories")
+    q.add_argument("--repo", action="append", help="Restrict to a named registered repository; repeat as needed")
     q = commands.add_parser("guard-check")
     q.add_argument("--branch", required=True)
     q.add_argument("--push", action="store_true")
@@ -137,6 +142,13 @@ def dispatch(args):
         return repos.doctor(config)
     if command == "resources":
         return repos.resources(config)
+    if command == "context":
+        if args.write:
+            result = context.write_index(config)
+            return dict(result, catalog=context.catalog(config, args.section))
+        return context.catalog(config, args.section)
+    if command == "inventory":
+        return context.inventory(config, args.repo)
     if command == "guard-install":
         return repos.install_guard(config, args.repo)
     if command == "work":

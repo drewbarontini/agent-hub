@@ -27,6 +27,28 @@ Agent Hub has **three conceptual parts**:
 
 This operating model is distinct from the **Core → Instance → Personal Overlay** ownership boundaries described below. Editor layout and agent provider are implementation choices.
 
+## Context navigation
+
+An Instance is also a practical home for the Orchestrator. Its workspace generates
+an ignored `.hub/CONTEXT.md` index from the existing repository and resource
+registries: **Board** (what needs doing), **Memory / Docs** (what we've learned and
+know), and available capabilities. It is a *navigation aid*, not another registry,
+a copy of source material, or evidence that a service is authenticated.
+
+```sh
+# In an initialized Instance using its pinned Core
+python3.13 .hub/bin/hub context --write
+python3.13 .hub/bin/hub context --section resources
+python3.13 .hub/bin/hub context --section repositories
+python3.13 .hub/bin/hub inventory --repo example
+```
+
+The index starts short and links to generated detail pages as the collection grows.
+`inventory` examines only known instruction and skill paths inside available,
+registered repositories. It reports exact content overlap or matching filenames
+without copying their content, moving files, or inferring rights to share them.
+See [Context navigation](docs/context-navigation.md).
+
 ## Start
 
 Requirements: Python **3.11+**, Git **2.31+**, and macOS or Linux. VS Code and Codex

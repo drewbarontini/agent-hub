@@ -37,6 +37,20 @@ flowchart TD
 
 This is an operating model, not a fixed software-development pipeline. Workers can investigate uncertainty or produce non-code artifacts; skills determine their own methods. No new handoff document or task registry is required if the owning source already provides continuity.
 
+## Navigating Context
+
+The Instance acts as a starting point, not a storage destination. A local,
+generated `.hub/CONTEXT.md` indexes the existing Board, knowledge references,
+repositories, and capabilities. Short summaries lead to drill-down files and
+`hub context --section ...` as needed; authoritative records remain wherever
+their owners maintain them. The index does not fetch, summarize or synchronize
+external data, and no presence check proves connectivity.
+
+`hub inventory` can check explicitly registered repositories for known agent
+instructions and skills, returning paths and conservative overlap classifications
+rather than their contents. It cannot decide which materials are genuinely
+transferable: ownership and promotion remain deliberate review actions.
+
 ## Ownership and implementation
 
 Core is a small CLI, not an owner of every resource. It uses Git, files, existing
