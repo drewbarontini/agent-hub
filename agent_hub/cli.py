@@ -10,13 +10,14 @@ from pathlib import Path
 from . import __version__
 from .common import CORE, HubError, git, redact, run, save, sanitize
 from .config import Config
-from . import agents, context, evolution, prune, repos, security, work
+from . import agents, context, evolution, human, prune, repos, security, work
 
 
 def parser():
     p = argparse.ArgumentParser(description="Agent Hub — one core, many contexts, independent ownership")
     p.add_argument("--version", action="version", version=__version__)
-    p.add_argument("--instance", default=".", help="Instance root (default current directory)")
+    p.add_argument("--instance", default=os.environ.get("HUB_INSTANCE") or ".",
+                   help="Instance root (default HUB_INSTANCE or current directory)")
     commands = p.add_subparsers(dest="command", required=True)
     q = commands.add_parser("init", help="Initialize an independent Instance (after proposal approval)")
     q.add_argument("destination")
@@ -29,7 +30,9 @@ def parser():
     q.add_argument("--root", action="append", required=True)
     q.add_argument("--depth", type=int, default=2)
     for name in ["config-check", "bootstrap", "status", "workspace", "doctor", "resources"]:
-        commands.add_parser(name)
+        q = commands.add_parser(name)
+        if name == "status":
+            status_format(q)
     q = commands.add_parser("context", help="View or regenerate the Instance Context Index")
     q.add_argument("--section", choices=["summary", "resources", "repositories"], default="summary")
     q.add_argument("--write", action="store_true", help="Regenerate ignored navigation files under .hub/")
@@ -60,6 +63,8 @@ def parser():
     for name in ["prepare", "status", "cleanup", "report", "release"]:
         r = sub.add_parser(name)
         r.add_argument("id")
+        if name == "status":
+            status_format(r)
         if name == "cleanup":
             r.add_argument("--apply", action="store_true")
         if name == "report":
@@ -99,6 +104,12 @@ def parser():
     q = commands.add_parser("secrets")
     q.add_argument("--staged", action="store_true")
     return p
+
+
+def status_format(command):
+    output = command.add_mutually_exclusive_group()
+    output.add_argument("--human", action="store_true", help="Show compact status and suggested next actions")
+    output.add_argument("--json", action="store_true", help="Show machine-readable JSON (the default)")
 
 
 def service(config, name, execute=False, allow_sensitive=False):
@@ -145,7 +156,8 @@ def dispatch(args):
     if command == "bootstrap":
         return repos.bootstrap(config)
     if command == "status":
-        return {"repositories": [repos.inspect(r) for r in config.repos.values()], "work": work.status(config)}
+        return {"repositories": [repos.inspect(r) for r in config.repos.values()],
+                "work": work.status(config, details=args.human)}
     if command == "workspace":
         return repos.workspace(config)
     if command == "doctor":
@@ -177,7 +189,7 @@ def dispatch(args):
         if args.action == "prepare":
             return work.prepare(config, args.id)
         if args.action == "status":
-            return work.status(config, args.id)
+            return work.status(config, args.id, details=args.human)
         if args.action == "cleanup":
             return work.cleanup(config, args.id, args.apply)
         if args.action == "report":
@@ -209,7 +221,11 @@ def main(argv=None):
     try:
         args = parser().parse_args(argv)
         result = dispatch(args)
-        print(json.dumps(sanitize(result), indent=2, default=str))
+        result = sanitize(result)
+        if getattr(args, "human", False):
+            print(human.status(result))
+        else:
+            print(json.dumps(result, indent=2, default=str))
         failed = isinstance(result, dict) and (result.get("ready") is False or result.get("passed") is False or
                                                result.get("exit_code", 0) not in (0, None))
         if failed:

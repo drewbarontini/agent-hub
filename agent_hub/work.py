@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import os
 import re
 import shlex
 import uuid
@@ -279,20 +280,49 @@ def validate_tree(config, unit, name):
     return path
 
 
-def status(config, identifier=None):
+def changed_files(path):
+    output = run(["git", "--no-optional-locks", "-C", path, "status", "--porcelain=v1", "-z",
+                  "--untracked-files=all"], text=False).stdout.split(b"\0")
+    files = []
+    fields = iter(output)
+    for field in fields:
+        if not field:
+            continue
+        item = {"status": field[:2].decode("ascii"), "path": os.fsdecode(field[3:])}
+        if "R" in item["status"] or "C" in item["status"]:
+            item["original_path"] = os.fsdecode(next(fields))
+        files.append(item)
+    return files
+
+
+def status(config, identifier=None, *, details=False):
     identifiers = [identifier] if identifier else sorted(p.parent.name for p in (config.root / "work").glob("*/unit.json"))
     rows = []
     for identifier in identifiers:
-        unit = load(config, identifier)
-        row = {"id": identifier, "title": unit["title"], "status": unit["status"], "repos": {},
-               "active_sessions": [s for s in unit["sessions"] if s["status"] == "running"]}
-        for name, entry in unit["repos"].items():
+        try:
+            unit = load(config, identifier)
+            repositories = unit["repos"]
+            row = {"id": identifier, "title": unit["title"], "status": unit["status"], "repos": {},
+                   "active_sessions": [s for s in unit["sessions"] if s["status"] == "running"]}
+            if details:
+                row.update(key=(unit.get("source") or {}).get("key"), sessions=unit["sessions"])
+        except (HubError, AttributeError, KeyError, TypeError, ValueError) as exc:
+            if not details:
+                raise
+            rows.append({"id": identifier, "problem": str(exc) if isinstance(exc, HubError) else
+                         "Invalid execution metadata; inspect the record"})
+            continue
+        for name, entry in repositories.items():
             p = location(config, identifier, name)
-            info = {"branch": entry["branch"], "present": p.exists()}
-            if p.exists():
+            info = {"branch": entry["branch"], "present": p.exists() or (details and p.is_symlink())}
+            if info["present"]:
                 try:
                     validate_tree(config, unit, name)
-                    info["dirty"] = bool(git(p, "status", "--porcelain", "--untracked-files=all"))
+                    if details:
+                        info["changed_files"] = changed_files(p)
+                        info["dirty"] = bool(info["changed_files"])
+                    else:
+                        info["dirty"] = bool(git(p, "--no-optional-locks", "status", "--porcelain", "--untracked-files=all"))
                     info["commits_since_base"] = int(git(p, "rev-list", "--count", entry["base"] + "..HEAD"))
                 except HubError as exc:
                     info["problem"] = str(exc)

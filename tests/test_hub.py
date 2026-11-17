@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_hub import agents, context, evolution, prune, repos, security, work
+from agent_hub import agents, context, evolution, human, prune, repos, security, work
 from agent_hub.cli import service
 from agent_hub.common import CORE, HubError, git, read_json, run, save, toml_string, write
 from agent_hub.config import Config
@@ -180,6 +180,171 @@ class HubTests(unittest.TestCase):
         self.assertEqual(data["tasks"]["tasks"][0]["type"], "process")
         self.assertIn(self.first, data["tasks"]["tasks"][0]["args"][0])
         self.assertIn("alpha", result["folders"])
+
+    def test_workspace_terminal_environment_uses_pinned_instance_from_repository_folder(self):
+        instance = (self.root / "instance with spaces").resolve()
+        evolution.init(instance, "other", str(self.source), ref=self.first)
+        config = Config(instance)
+        before = (instance / "core.lock").read_bytes()
+        data = read_json(Path(repos.workspace(config)["workspace"]))
+        settings = data["settings"]
+        self.assertEqual(settings["terminal.integrated.env.osx"], settings["terminal.integrated.env.linux"])
+        variables = settings["terminal.integrated.env.osx"]
+        env = dict(os.environ)
+        env.update({key: value.replace("${env:PATH}", env.get("PATH", "")) for key, value in variables.items()})
+        self.assertEqual(env["HUB_INSTANCE"], str(instance))
+        launcher = shutil.which("hub", path=env["PATH"])
+        self.assertEqual(launcher, str(instance / ".hub/bin/hub"))
+        self.assertEqual(Path(launcher).resolve(), instance / ".hub/cores" / self.first / "bin/hub")
+        for cwd in (instance, self.repo):
+            result = subprocess.run(["hub", "config-check"], cwd=cwd, env=env, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(json.loads(result.stdout)["repositories"], 0)
+        result = subprocess.run(["hub", "--instance", str(self.instance), "config-check"],
+                                cwd=self.repo, env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(json.loads(result.stdout)["repositories"], 1)
+        self.assertEqual(before, (instance / "core.lock").read_bytes())
+        task = data["tasks"]["tasks"][0]
+        self.assertEqual(task["args"][-2:], ["status", "--human"])
+        result = subprocess.run([task["command"], *task["args"]], cwd=task["options"]["cwd"],
+                                env=env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("No recorded work", result.stdout)
+
+    def test_status_formats_preserve_json_and_observe_changes_without_mutation(self):
+        unit = work.create(self.config, "Readable task", "Inspect a fixture", ["alpha"], "Inspect changes",
+                           {"provider": "manual", "key": "APP-22"})
+        work.prepare(self.config, unit["id"])
+        path = work.location(self.config, unit["id"], "alpha")
+        git(path, "mv", "example.txt", "renamed file.txt")
+        write(path / "new\nfile.txt", "new content")
+        for number in range(9):
+            write(path / f"zz-extra-{number}.txt", "extra change")
+        unit["status"] = "prepared"
+        unit["sessions"] = [{"id": "recent", "status": "finished", "exit_code": 0}]
+        work.persist(self.config, unit)
+        record = work.record_path(self.config, unit["id"])
+        index = Path(git(path, "rev-parse", "--path-format=absolute", "--git-path", "index"))
+        before = (record.read_bytes(), index.read_bytes())
+        command = [sys.executable, str(CORE / "bin/hub"), "--instance", str(self.instance)]
+        for args in (["status"], ["work", "status", "APP-22"]):
+            default = subprocess.run(command + args, capture_output=True, text=True)
+            explicit = subprocess.run(command + args + ["--json"], capture_output=True, text=True)
+            readable = subprocess.run(command + args + ["--human"], capture_output=True, text=True)
+            self.assertEqual(default.returncode, 0, default.stderr)
+            self.assertEqual(default.stdout, explicit.stdout)
+            result = json.loads(default.stdout)
+            rows = result["work"] if isinstance(result, dict) else result
+            self.assertEqual(rows, work.status(self.config, unit["id"]))
+            self.assertNotIn("key", rows[0])
+            self.assertNotIn("changed_files", rows[0]["repos"]["alpha"])
+            self.assertEqual(readable.returncode, 0, readable.stderr)
+            self.assertIn("APP-22 / " + unit["id"], readable.stdout)
+            self.assertIn('"example.txt" -> "renamed file.txt"', readable.stdout)
+            self.assertIn('"new\\nfile.txt"', readable.stdout)
+            self.assertIn("+ 3 more changed files", readable.stdout)
+            self.assertIn("Session recent: finished (exit 0)", readable.stdout)
+            self.assertIn("Review changed files", readable.stdout)
+        self.assertEqual(before, (record.read_bytes(), index.read_bytes()))
+        bad = subprocess.run(command + ["status", "--human", "--json"], capture_output=True, text=True)
+        self.assertNotEqual(bad.returncode, 0)
+
+    def test_human_status_preserves_raw_filename_bytes_and_carriage_returns(self):
+        cases = [(b"old\rname.txt", b"new\r\nname.txt", b"untracked\r.txt")]
+        # macOS filesystems can reject non-UTF-8 names; the raw stream test below
+        # exercises those bytes independently of filesystem restrictions.
+        if sys.platform != "darwin":
+            cases.append((b"old-\xfe.txt", b"new-\xff.txt", b"untracked-\xff.txt"))
+        for original, renamed, untracked in cases:
+            with self.subTest(original=original):
+                unit = self.unit()
+                path = work.location(self.config, unit["id"], "alpha")
+                git(path, "mv", "example.txt", os.fsdecode(original))
+                commit(path)
+                git(path, "mv", os.fsdecode(original), os.fsdecode(renamed))
+                (path / os.fsdecode(untracked)).write_bytes(b"untracked content")
+                record = work.record_path(self.config, unit["id"])
+                index = Path(git(path, "rev-parse", "--path-format=absolute", "--git-path", "index"))
+                before = (record.read_bytes(), index.read_bytes())
+                files = work.changed_files(path)
+                self.assertEqual({os.fsencode(item["path"]) for item in files}, {renamed, untracked})
+                rename = next(item for item in files if "original_path" in item)
+                self.assertEqual(os.fsencode(rename["original_path"]), original)
+                command = [sys.executable, str(CORE / "bin/hub"), "--instance", str(self.instance)]
+                for args in (["status"], ["work", "status", unit["id"]]):
+                    readable = subprocess.run(command + args + ["--human"], capture_output=True, text=True)
+                    self.assertEqual(readable.returncode, 0, readable.stderr)
+                    for filename in (original, renamed, untracked):
+                        self.assertIn(json.dumps(os.fsdecode(filename)), readable.stdout)
+                    default = subprocess.run(command + args, capture_output=True, text=True)
+                    explicit = subprocess.run(command + args + ["--json"], capture_output=True, text=True)
+                    self.assertEqual(default.returncode, 0, default.stderr)
+                    self.assertEqual(default.stdout, explicit.stdout)
+                self.assertEqual(before, (record.read_bytes(), index.read_bytes()))
+
+    def test_changed_files_decodes_raw_git_stream_without_losing_bytes(self):
+        payload = b"R  new-\xff\r\n.txt\0old-\xfe\r.txt\0?? untracked-\xff\r.txt\0"
+        def stream(args, **kwargs):
+            return run([sys.executable, "-c", f"import os; os.write(1, {payload!r})"], **kwargs)
+        with patch("agent_hub.work.run", side_effect=stream):
+            files = work.changed_files(self.repo)
+        self.assertEqual(files[0]["status"], "R ")
+        self.assertEqual(os.fsencode(files[0]["path"]), b"new-\xff\r\n.txt")
+        self.assertEqual(os.fsencode(files[0]["original_path"]), b"old-\xfe\r.txt")
+        self.assertEqual(os.fsencode(files[1]["path"]), b"untracked-\xff\r.txt")
+        row = {"id": "W-fixture", "title": "Byte paths", "status": "prepared", "sessions": [],
+               "repos": {"alpha": {"present": True, "branch": "task", "dirty": True, "changed_files": files}}}
+        output = human.status([row])
+        for name in (b"new-\xff\r\n.txt", b"old-\xfe\r.txt", b"untracked-\xff\r.txt"):
+            self.assertIn(json.dumps(os.fsdecode(name)), output)
+
+    def test_human_status_guidance_tracks_lifecycle_and_session_limits(self):
+        self.assertIn("No recorded work", human.status(work.status(self.config, details=True)))
+        unit = work.create(self.config, "Bounded task", "Inspect fixture", ["alpha"], "Inspect state")
+        def view():
+            return human.status(work.status(self.config, unit["id"], details=True))
+        self.assertIn("hub work start " + unit["id"], view())
+        work.prepare(self.config, unit["id"])
+        self.assertIn("launch plan only", view())
+        unit = work.load(self.config, unit["id"])
+        for state, expected in (("running", "wait for it to finish"), ("interrupted", "Verify interrupted processes have ended")):
+            unit["sessions"] = [{"id": "session", "status": state}]
+            work.persist(self.config, unit)
+            self.assertIn("Session session: " + state, view())
+            self.assertIn(expected, view())
+            self.assertNotIn("Next: hub agent", view())
+        unit["sessions"] = []
+        unit["status"] = "review"
+        work.persist(self.config, unit)
+        self.assertIn("after merge, preview hub work prune", view())
+        path = work.location(self.config, unit["id"], "alpha")
+        git(path, "checkout", "-b", "unexpected")
+        self.assertIn("Worktree branch changed", view())
+        self.assertIn("repair the worktree problem", view())
+        git(path, "checkout", unit["repos"]["alpha"]["branch"])
+        git(self.repo, "worktree", "remove", str(path))
+        self.assertIn("Inspect missing worktrees", view())
+        unit["status"] = "cleaned"
+        work.persist(self.config, unit)
+        self.assertIn("No action; execution history is retained", view())
+
+    def test_human_status_preserves_healthy_rows_and_escapes_terminal_controls(self):
+        unit = self.unit(names=[])
+        unit = work.load(self.config, unit["id"])
+        unit["title"] = "Task\x1b[2J\ncontinued"
+        work.persist(self.config, unit)
+        broken = work.create(self.config, "Broken", "Inspect fixture", [], "Inspect record")
+        for content in ("invalid JSON", json.dumps({key: value for key, value in broken.items() if key != "repos"}),
+                        json.dumps(dict(broken, repos=[]))):
+            work.record_path(self.config, broken["id"]).write_text(content)
+            output = human.status(work.status(self.config, details=True))
+            self.assertIn(unit["id"], output)
+            self.assertIn(broken["id"] + " [unavailable]", output)
+            self.assertIn("repair the execution record", output)
+            self.assertIn("Complete the bounded analysis", output)
+            self.assertIn("Task\\u001b[2J\\u000acontinued", output)
+            self.assertNotIn("\x1b", output)
 
     def test_context_index_reads_registry_without_fetching_external_sources(self):
         with (self.instance / "hub.toml").open("a") as stream:

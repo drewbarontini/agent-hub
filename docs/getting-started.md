@@ -35,7 +35,7 @@ partial directory and use a new empty destination; do not blindly erase it.
 
 The initializer creates an executable `.hub/bin/hub` launcher pointing to the
 Instance's **pinned Core**, not your editable Core checkout. From the initialized
-Instance root, expose it for **this shell session only**:
+Instance root, expose it for **this shell session only** when using an external terminal:
 
 ```sh
 cd /approved/my-hub
@@ -45,10 +45,23 @@ hub config-check
 
 You can now use `hub bootstrap`, `hub workspace`, `hub doctor`,
 `hub context`, and other normal commands in that terminal. Repeat the
-`export` in each new shell; it does not edit shell profiles, install a global
+`export` in each new external shell; it does not edit shell profiles, install a global
 command, or change `core.lock`. If you switch Instances, switch to the target
 Instance and update PATH for that session. Run commands from the Instance root
 (or pass `--instance /approved/my-hub` before the command).
+
+Generated VS Code workspaces configure new macOS/Linux terminals automatically:
+PATH starts with the Instance's `.hub/bin`, and `HUB_INSTANCE` selects that
+Instance even when the terminal opens in a repository folder. Open or reload the
+generated workspace and create a new terminal to receive these settings. Explicit
+`--instance` overrides `HUB_INSTANCE`; outside the workspace, an unset variable
+keeps the current-directory default. When switching Instances inside a workspace
+terminal, use the target Instance's launcher and explicit `--instance`, or open
+its generated workspace. Shell profiles and global installation are unchanged.
+
+Use `hub status --human` for compact repository/work status and suggested next
+actions, or run the generated **Hub: status** task. Both `hub status` and
+`hub work status <id-or-key>` retain JSON by default; `--json` selects it explicitly.
 
 The launcher starts via `#!/usr/bin/env python3`, so `python3` on PATH must
 be **3.11 or newer**. Without the PATH step, run `./.hub/bin/hub doctor` when

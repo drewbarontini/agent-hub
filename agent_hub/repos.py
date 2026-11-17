@@ -106,12 +106,16 @@ def workspace(config):
     pinned = config.root / ".hub/cores" / config.lock["commit"] / "bin/hub"
     command = [sys.executable, str(pinned), "--instance", str(config.root)]
     tasks = []
-    for name, args in [("Hub: status", ["status"]), ("Hub: doctor", ["doctor"]),
+    for name, args in [("Hub: status", ["status", "--human"]), ("Hub: doctor", ["doctor"]),
                        ("Hub: Orchestrator", ["agent", "orchestrator", "--launch"])]:
         tasks.append({"label": name, "type": "process", "command": command[0], "args": command[1:] + args,
                       "options": {"cwd": str(config.root)}, "problemMatcher": [],
                       "presentation": {"panel": "dedicated"}})
-    data = {"folders": folders, "settings": {"terminal.integrated.defaultLocation": "editor"},
+    terminal_environment = {"PATH": str(config.root / ".hub/bin") + ":${env:PATH}",
+                            "HUB_INSTANCE": str(config.root)}
+    data = {"folders": folders, "settings": {"terminal.integrated.defaultLocation": "editor",
+            "terminal.integrated.env.osx": terminal_environment,
+            "terminal.integrated.env.linux": terminal_environment},
             "extensions": {"recommendations": ["openai.chatgpt"]},
             "tasks": {"version": "2.0.0", "tasks": tasks}}
     write(target, json.dumps(data, indent=2) + "\n")
