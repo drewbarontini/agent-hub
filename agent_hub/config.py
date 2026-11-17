@@ -5,6 +5,7 @@ import tomllib
 from pathlib import Path
 
 from .common import HubError, child, remote_id, slug
+from .setup import configuration
 
 
 def load_toml(path, optional=False):
@@ -73,6 +74,10 @@ class Config:
                     raise HubError(f"{name}.{flag} must be a boolean")
             repo["default_branch"] = branch
             local_repo = self.data.get("repos", {}).get(name, {})
+            shared_setup, local_setup = repo.get("setup", {}), local_repo.get("setup", {})
+            if not isinstance(shared_setup, dict) or not isinstance(local_setup, dict):
+                raise HubError("Repository setup must be a table")
+            repo["setup"] = configuration(merge(shared_setup, local_setup))
             if "path" in local_repo:
                 repo["path"] = self.path(local_repo["path"])
             else:

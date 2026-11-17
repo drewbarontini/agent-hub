@@ -10,7 +10,7 @@ from pathlib import Path
 from . import __version__
 from .common import CORE, HubError, git, redact, run, save, sanitize
 from .config import Config
-from . import agents, context, evolution, human, prune, repos, security, work
+from . import agents, context, evolution, human, prune, repos, security, setup, work
 
 
 def parser():
@@ -73,6 +73,12 @@ def parser():
         if name == "release":
             r.add_argument("--session", required=True)
             r.add_argument("--ack-session-ended", action="store_true", required=True)
+    r = sub.add_parser("setup", help="Preview explicit repository setup; commands run only with --apply")
+    r.add_argument("id")
+    r.add_argument("--repo", action="append", help="Select an execution repository; repeat as needed")
+    action = r.add_mutually_exclusive_group()
+    action.add_argument("--apply", action="store_true")
+    action.add_argument("--skip", action="store_true", help="Record skipped setup without running commands or linking settings")
     r = sub.add_parser("prune", help="Assess recorded work for safe cleanup; dry run by default")
     r.add_argument("id", nargs="?", help="Optional execution ID; default assesses all records")
     r.add_argument("--apply", action="store_true", help="Remove eligible worktrees after fresh checks")
@@ -190,6 +196,8 @@ def dispatch(args):
             return work.prepare(config, args.id)
         if args.action == "status":
             return work.status(config, args.id, details=args.human)
+        if args.action == "setup":
+            return setup.execute(config, args.id, args.repo, apply=args.apply, skip=args.skip)
         if args.action == "cleanup":
             return work.cleanup(config, args.id, args.apply)
         if args.action == "report":

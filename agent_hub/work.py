@@ -11,6 +11,7 @@ from pathlib import Path
 
 from .common import HubError, child, git, read_json, run, save, slug, write
 from .repos import available, guard
+from . import setup
 
 
 def now():
@@ -315,6 +316,10 @@ def status(config, identifier=None, *, details=False):
         for name, entry in repositories.items():
             p = location(config, identifier, name)
             info = {"branch": entry["branch"], "present": p.exists() or (details and p.is_symlink())}
+            if details:
+                observed_setup = setup.observation(config, unit, name)
+                if config.repo(name).get("setup") or observed_setup["state"] != "unconfigured":
+                    info["setup"] = observed_setup
             if info["present"]:
                 try:
                     validate_tree(config, unit, name)
@@ -352,7 +357,7 @@ def cleanup(config, identifier, apply=False):
             check_index_flags(p)
             # Include ignored files: Git otherwise silently removes ignored artifacts.
             if git(p, "status", "--porcelain", "--untracked-files=all", "--ignored=matching"):
-                raise HubError(f"Refusing cleanup: {name} has changed, untracked or ignored files")
+                raise HubError(f"Refusing cleanup: {name} has changed, untracked or ignored files" + setup.cleanup_notice(unit, name))
             repo = config.repo(name)
             head = git(p, "rev-parse", "HEAD")
             target = "refs/heads/" + repo["default_branch"]

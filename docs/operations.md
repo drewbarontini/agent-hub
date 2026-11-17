@@ -151,6 +151,44 @@ and untrack existing records after reconciling their useful evidence to the sour
 Do not remove metadata needed by active sessions or recoverable worktrees. Native
 agent transcripts, execution records, snapshots and `.hub/` remain machine-local.
 
+## Repository setup
+
+Prepared worktrees contain tracked code; their dependencies and local settings
+are a separate, explicit operator action. After configuring [repository setup](configuration.md#explicit-repository-setup):
+
+```sh
+hub work setup APP-123
+hub work setup APP-123 --repo frontend --apply
+hub work setup APP-123 --skip
+hub work status APP-123 --human
+```
+
+The default is a preview. `--apply` runs the configured steps; `--skip` records a
+deliberate skip without requiring missing local settings, running commands or
+creating links. `--repo` selects only repositories already in this execution;
+omit it to select all. Selected repository identities, links and environment
+paths are preflighted before changes. Running/interrupted Worker sessions block
+setup until inspected and released.
+
+Each explicit apply reruns commands and reuses only Hub-created, unchanged links.
+Failures and interruption preserve partial artifacts and their receipts. Inspect
+processes and artifacts before retrying an interrupted setup. Receipts retain
+sanitized commands, exit codes, states and created-link identities in ignored
+execution metadata; they do not store command output or settings contents.
+Commands that time out or cannot start have no exit code and report failure.
+
+`ready: true` means configured steps completed, not that application checks passed.
+Skipped or unconfigured setup has unknown readiness; a command failure returns
+`ready: false` and a nonzero CLI exit. Human status shows the last setup result
+and flags configuration changes without rerunning commands. Check the application
+using its own required verification before reporting completion.
+
+Setup receipts grant no deletion permission: both cleanup commands still refuse
+changed, untracked and ignored worktree files, including managed settings links
+and generated dependencies. Inspect and explicitly remove disposable artifacts
+before retrying cleanup; unmanaged files inside dependency directories must be
+preserved. Cache directories outside repository worktrees and receipts remain.
+
 ## Canonical completion logging
 
 Before reporting completed implementation, log the outcome in the Instance's

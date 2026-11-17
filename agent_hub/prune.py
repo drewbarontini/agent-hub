@@ -8,7 +8,7 @@ from pathlib import Path
 
 from .common import HubError, git, remote_id, run
 from .repos import available, executable
-from . import work
+from . import setup, work
 
 
 def ancestor(repo, commit, target):
@@ -109,7 +109,7 @@ def clean_tree(config, unit, name, expected_head):
         raise HubError("Task branch changed during cleanup assessment")
     work.check_index_flags(path)
     if git(path, "--no-optional-locks", "--no-replace-objects", "status", "--porcelain", "--untracked-files=all", "--ignored=matching"):
-        raise HubError("Worktree has changed, untracked or ignored files")
+        raise HubError("Worktree has changed, untracked or ignored files" + setup.cleanup_notice(unit, name))
 
 
 def require_local_history(repo):

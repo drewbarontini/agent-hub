@@ -8,6 +8,13 @@ checkout = false
 visible = true
 description = "Attach an existing checkout; opt in to cloning with checkout = true"
 
+# Optional; preview with `hub work setup <id>` and execute with `--apply`.
+# [repos.setup]
+# commands = [["npm", "ci", "--ignore-scripts"]]
+# links = [{source = ".env.local", target = ".env.local"}]
+# environment_dirs = ["NPM_CONFIG_CACHE"]
+# timeout = 300
+
 [[repos]]
 name = "agent-hub"
 folder = "agent-hub"
