@@ -12,6 +12,56 @@ hub resources
 
 ## Bounded work
 
+After reading the canonical ticket and agreeing on the execution scope, start
+with one command:
+
+```sh
+hub work start APP-123 --title "Investigate test failures" \
+  --intent "Find the cause; make only the necessary fix" \
+  --repo frontend --repo backend --resource project-notes \
+  --verify "Run relevant tests and describe remaining risks" \
+  --source-provider github --source-id 123 \
+  --source-url https://github.com/example/project/issues/123
+```
+
+`start` creates the execution record and prepares its worktrees. It prints the
+execution directory and commands for inspection, sandbox checking and the Worker
+launch plan; it does not launch a Worker, fetch, install dependencies or start
+services. An explicit `--launch` remains necessary to run a Worker.
+
+Later, after re-reading the source ticket, resume with `hub work start APP-123`.
+Work commands, `sandbox-check`, and `agent worker` accept either the execution ID
+or an unambiguous recorded source key:
+
+```sh
+hub work status APP-123
+hub sandbox-check APP-123
+hub agent worker APP-123
+```
+
+The first keyed start requires a source provider and immutable source ID, plus
+title, intent, verification and explicit repositories. Use `--no-repos` for
+non-code work; omit the source fields and key for manual work. Native tools or
+the operator resolve canonical tickets; Hub does not look up a key, authenticate
+a provider, or establish source access.
+
+Repeated starts reuse the provider/immutable-ID pair, preserving recorded branch
+names even if a source key changed. The result returns the original execution ID
+and key; use those references afterward. Conflicting identities, ambiguous keys,
+changed supplied requirements or repository/context scope are refused rather
+than silently overwriting execution intent. Resume also refuses running or
+interrupted sessions, cleaned executions and invalid worktree identities. Work
+under review retains its review state and local changes. Reconcile changed
+requirements explicitly before resuming; do not bypass refusals by making a
+duplicate execution.
+
+Start selection, creation and preparation share a local operation lock. A failed
+preparation keeps a planned execution for inspection and retry rather than
+deleting branches or partially prepared worktrees. No process-liveness inference
+or cross-machine ownership coordination is added.
+
+The separate record-creation and preparation commands remain available:
+
 ```sh
 hub work create --title "Investigate test failures" \
   --intent "Find the cause; make only the necessary fix" \

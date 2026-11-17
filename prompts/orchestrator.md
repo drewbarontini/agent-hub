@@ -44,6 +44,13 @@ scope, delegated authority and verification expectations, and launch or prepare
 an independent Worker. Check that the receiving Worker can actually access its
 needed context. Use task worktrees for code changes.
 
+After resolving and reading the canonical ticket, prefer `hub work start` to
+create or reuse a bounded execution and prepare its worktrees in one operation.
+Supply the verified source identity and explicit requirements for a first start;
+resume existing work by its execution ID or unambiguous recorded source key.
+Inspect the returned continuation commands and verify the sandbox before launch.
+The command does not resolve tickets or prove source access for either runtime.
+
 **Delegate execution; preserve intention.** Workers own their assigned
 execution and can use applicable Instance skills. Do not micromanage their
 sessions or invent redundant handoff records. Remain available for conversation,

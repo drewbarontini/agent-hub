@@ -42,16 +42,21 @@ def parser():
     q.add_argument("repo")
     q = commands.add_parser("work")
     sub = q.add_subparsers(dest="action", required=True)
-    r = sub.add_parser("create")
-    r.add_argument("--title", required=True)
-    r.add_argument("--intent", required=True)
-    r.add_argument("--verify", required=True)
-    r.add_argument("--repo", action="append", default=[])
-    r.add_argument("--resource", action="append", default=[])
-    r.add_argument("--source-provider", default="manual")
-    r.add_argument("--source-id")
-    r.add_argument("--source-key", help="Human ticket key used in branch names; distinct from immutable source ID")
-    r.add_argument("--source-url")
+    for action in ("create", "start"):
+        r = sub.add_parser(action, help="Create and prepare, or resume bounded work" if action == "start" else "Create an execution record")
+        if action == "start":
+            r.add_argument("reference", nargs="?", help="Execution ID or unambiguous human source key")
+        for option in ("title", "intent", "verify"):
+            r.add_argument("--" + option, required=action == "create")
+        scope = r.add_mutually_exclusive_group()
+        scope.add_argument("--repo", action="append", default=[] if action == "create" else None)
+        if action == "start":
+            scope.add_argument("--no-repos", action="store_true", help="Explicitly scope non-code work")
+        r.add_argument("--resource", action="append", default=[] if action == "create" else None)
+        r.add_argument("--source-provider", default="manual" if action == "create" else None)
+        r.add_argument("--source-id")
+        r.add_argument("--source-key", help="Human ticket key used in branch names; distinct from immutable source ID")
+        r.add_argument("--source-url")
     for name in ["prepare", "status", "cleanup", "report", "release"]:
         r = sub.add_parser(name)
         r.add_argument("id")
@@ -152,15 +157,15 @@ def dispatch(args):
     if command == "guard-install":
         return repos.install_guard(config, args.repo)
     if command == "work":
-        if args.action == "create":
-            source = {"provider": args.source_provider}
-            if args.source_id:
-                source["id"] = args.source_id
-            if args.source_key:
-                source["key"] = args.source_key
-            if args.source_url:
-                source["url"] = args.source_url
+        if args.action in {"create", "start"}:
+            source = {field: getattr(args, "source_" + field) for field in ("provider", "id", "key", "url")
+                      if getattr(args, "source_" + field) is not None}
+            if args.action == "start":
+                return work.start(config, args.reference, title=args.title, intent=args.intent,
+                                  names=[] if args.no_repos else args.repo, verification=args.verify,
+                                  source=source, resource_names=args.resource)
             return work.create(config, args.title, args.intent, args.repo, args.verify, source, args.resource)
+        args.id = work.resolve(config, args.id)
         if args.action == "prepare":
             return work.prepare(config, args.id)
         if args.action == "status":
@@ -173,9 +178,11 @@ def dispatch(args):
     if command == "agent":
         if args.role == "worker" and not args.id:
             raise HubError("Worker requires a work-unit ID")
+        if args.role == "worker":
+            args.id = work.resolve(config, args.id)
         return agents.launch(config, args.role, args.id, args.noninteractive) if args.launch else agents.plan(config, args.role, args.id)
     if command == "sandbox-check":
-        return agents.sandbox_probe(config, args.id)
+        return agents.sandbox_probe(config, work.resolve(config, args.id))
     if command == "adopt":
         source = args.source or config.data.get("core", {}).get("source", config.lock["source"])
         return evolution.adopt(config, source, args.ref, args.apply)
