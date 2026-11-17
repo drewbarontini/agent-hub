@@ -867,6 +867,60 @@ class HubTests(unittest.TestCase):
         self.assertEqual(row["state"], "kept")
         self.assertTrue((path / "ignored/cache").exists())
 
+    def check_hidden_index_changes(self, flags):
+        unit, path, _ = self.cleanup_fixture()
+        for flag in flags:
+            git(path, "update-index", flag, "--", "example.txt")
+        index = Path(git(path, "rev-parse", "--path-format=absolute", "--git-path", "index"))
+        before = index.read_bytes()
+        refs = git(self.repo, "show-ref")
+        # Flags alone make cleanliness uncertain, even before a hidden edit.
+        self.assertEqual(prune.prune(self.config, unit["id"])["work"][0]["state"], "kept")
+        write(path / "example.txt", "valuable hidden edit\n")
+        for apply in (False, True):
+            with self.subTest(apply=apply):
+                row, = prune.prune(self.config, unit["id"], apply=apply, delete_branches=True)["work"]
+                self.assertEqual(row["state"], "kept")
+                self.assertIn("index", row["reasons"][0])
+                self.assertEqual((path / "example.txt").read_text(), "valuable hidden edit\n")
+                self.assertEqual(index.read_bytes(), before)
+                self.assertEqual(git(self.repo, "show-ref"), refs)
+
+    def test_prune_refuses_assume_unchanged_entries(self):
+        self.check_hidden_index_changes(["--assume-unchanged"])
+
+    def test_prune_refuses_skip_worktree_entries(self):
+        self.check_hidden_index_changes(["--skip-worktree"])
+
+    def test_prune_refuses_combined_hidden_index_flags(self):
+        self.check_hidden_index_changes(["--assume-unchanged", "--skip-worktree"])
+
+    def test_cleanup_refuses_hidden_index_changes_without_modifying_index(self):
+        unit, path, _ = self.cleanup_fixture()
+        git(path, "update-index", "--assume-unchanged", "--", "example.txt")
+        write(path / "example.txt", "valuable hidden edit\n")
+        index = Path(git(path, "rev-parse", "--path-format=absolute", "--git-path", "index"))
+        before = index.read_bytes()
+        for apply in (False, True):
+            with self.subTest(apply=apply), self.assertRaisesRegex(HubError, "index"):
+                work.cleanup(self.config, unit["id"], apply)
+        self.assertEqual((path / "example.txt").read_text(), "valuable hidden edit\n")
+        self.assertEqual(index.read_bytes(), before)
+
+    def test_prune_rechecks_index_flags_immediately_before_removal(self):
+        unit, path, _ = self.cleanup_fixture()
+        original = prune.apply_unit
+        def hide_edit(*args):
+            git(path, "update-index", "--assume-unchanged", "--", "example.txt")
+            write(path / "example.txt", "hidden after assessment\n")
+            return original(*args)
+        with patch.object(prune, "apply_unit", side_effect=hide_edit):
+            result = prune.prune(self.config, unit["id"], apply=True, delete_branches=True)
+        self.assertEqual(result["exit_code"], 1)
+        self.assertEqual(result["work"][0]["state"], "failed")
+        self.assertEqual(result["work"][0]["removed_worktrees"], [])
+        self.assertEqual((path / "example.txt").read_text(), "hidden after assessment\n")
+
     def test_prune_refuses_stale_or_missing_refs_and_unreachable_live_remote(self):
         unit, path, pr = self.cleanup_fixture()
         write(self.repo / "later.txt", "later default work")

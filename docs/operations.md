@@ -181,6 +181,11 @@ and refresh refs through normal authorized Git operations. Stale refs can produc
 a conservative refusal. Branches, metadata and top-level work-unit artifacts remain.
 There is no force flag or automatic branch deletion.
 
+Both cleanup commands refuse index entries marked `assume-unchanged` or
+`skip-worktree`, even when Git reports a clean worktree: those flags can conceal
+edited files. Inspect the files and clear flags explicitly before reassessing;
+Hub never clears them automatically or rewrites the index to check cleanliness.
+
 ### Assess merged work
 
 To assess all recorded executions, or one execution ID:

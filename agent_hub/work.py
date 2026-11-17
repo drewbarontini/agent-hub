@@ -301,6 +301,13 @@ def status(config, identifier=None):
     return rows
 
 
+def check_index_flags(path):
+    # Status and worktree removal trust these flags and can miss edited files.
+    entries = git(path, "--no-optional-locks", "ls-files", "-v", "-z").split("\0")
+    if any(entry and (entry[0].islower() or entry[0] == "S") for entry in entries):
+        raise HubError("Worktree has assume-unchanged or skip-worktree index entries; inspect and clear flags explicitly before cleanup")
+
+
 def cleanup(config, identifier, apply=False):
     with mutation(config):
         unit = load(config, identifier)
@@ -312,6 +319,7 @@ def cleanup(config, identifier, apply=False):
             if not p.exists():
                 continue
             validate_tree(config, unit, name)
+            check_index_flags(p)
             # Include ignored files: Git otherwise silently removes ignored artifacts.
             if git(p, "status", "--porcelain", "--untracked-files=all", "--ignored=matching"):
                 raise HubError(f"Refusing cleanup: {name} has changed, untracked or ignored files")
@@ -327,6 +335,7 @@ def cleanup(config, identifier, apply=False):
             candidates.append((repo, p, entry["branch"]))
         if apply:
             for repo, p, branch in candidates:
+                check_index_flags(p)
                 run(["git", "-C", repo["path"], "worktree", "remove", p])
                 # Keep branches as a further recovery path; never force branch deletion.
             unit["status"] = "cleaned"

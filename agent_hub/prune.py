@@ -107,6 +107,7 @@ def clean_tree(config, unit, name, expected_head):
     path = work.validate_tree(config, unit, name)
     if git(path, "rev-parse", "HEAD") != expected_head:
         raise HubError("Task branch changed during cleanup assessment")
+    work.check_index_flags(path)
     if git(path, "--no-optional-locks", "--no-replace-objects", "status", "--porcelain", "--untracked-files=all", "--ignored=matching"):
         raise HubError("Worktree has changed, untracked or ignored files")
 
