@@ -33,9 +33,9 @@ def sanitize(value):
     return value
 
 
-def run(args, cwd=None, *, check=True, timeout=60):
+def run(args, cwd=None, *, check=True, timeout=60, text=True):
     try:
-        result = subprocess.run([str(x) for x in args], cwd=cwd, text=True,
+        result = subprocess.run([str(x) for x in args], cwd=cwd, text=text,
                                 capture_output=True, timeout=timeout)
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise HubError(f"Cannot run {Path(str(args[0])).name}: {type(exc).__name__}") from exc

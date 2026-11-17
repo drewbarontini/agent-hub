@@ -22,7 +22,8 @@ hub status --json
 
 JSON remains the default on both status commands. The human view shows source
 keys, branches, changed files (up to eight per worktree), session state and next
-actions. Filenames are quoted; rename pairs retain both names. Status describes
+actions. Filenames preserve raw bytes and control characters through escaped,
+quoted display; rename pairs retain both names. Status describes
 local execution state, not canonical ticket completion or live process liveness.
 Its suggestions run nothing and do not prove that cleanup is safe; inspect
 interrupted processes before releasing sessions and preview cleanup after merge.

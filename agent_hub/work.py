@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import contextlib
 import fcntl
+import os
 import re
 import shlex
 import uuid
@@ -281,15 +282,15 @@ def validate_tree(config, unit, name):
 
 def changed_files(path):
     output = run(["git", "--no-optional-locks", "-C", path, "status", "--porcelain=v1", "-z",
-                  "--untracked-files=all"]).stdout.split("\0")
+                  "--untracked-files=all"], text=False).stdout.split(b"\0")
     files = []
     fields = iter(output)
     for field in fields:
         if not field:
             continue
-        item = {"status": field[:2], "path": field[3:]}
-        if "R" in field[:2] or "C" in field[:2]:
-            item["original_path"] = next(fields)
+        item = {"status": field[:2].decode("ascii"), "path": os.fsdecode(field[3:])}
+        if "R" in item["status"] or "C" in item["status"]:
+            item["original_path"] = os.fsdecode(next(fields))
         files.append(item)
     return files
 

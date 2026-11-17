@@ -250,6 +250,55 @@ class HubTests(unittest.TestCase):
         bad = subprocess.run(command + ["status", "--human", "--json"], capture_output=True, text=True)
         self.assertNotEqual(bad.returncode, 0)
 
+    def test_human_status_preserves_raw_filename_bytes_and_carriage_returns(self):
+        cases = [(b"old\rname.txt", b"new\r\nname.txt", b"untracked\r.txt")]
+        # macOS filesystems can reject non-UTF-8 names; the raw stream test below
+        # exercises those bytes independently of filesystem restrictions.
+        if sys.platform != "darwin":
+            cases.append((b"old-\xfe.txt", b"new-\xff.txt", b"untracked-\xff.txt"))
+        for original, renamed, untracked in cases:
+            with self.subTest(original=original):
+                unit = self.unit()
+                path = work.location(self.config, unit["id"], "alpha")
+                git(path, "mv", "example.txt", os.fsdecode(original))
+                commit(path)
+                git(path, "mv", os.fsdecode(original), os.fsdecode(renamed))
+                (path / os.fsdecode(untracked)).write_bytes(b"untracked content")
+                record = work.record_path(self.config, unit["id"])
+                index = Path(git(path, "rev-parse", "--path-format=absolute", "--git-path", "index"))
+                before = (record.read_bytes(), index.read_bytes())
+                files = work.changed_files(path)
+                self.assertEqual({os.fsencode(item["path"]) for item in files}, {renamed, untracked})
+                rename = next(item for item in files if "original_path" in item)
+                self.assertEqual(os.fsencode(rename["original_path"]), original)
+                command = [sys.executable, str(CORE / "bin/hub"), "--instance", str(self.instance)]
+                for args in (["status"], ["work", "status", unit["id"]]):
+                    readable = subprocess.run(command + args + ["--human"], capture_output=True, text=True)
+                    self.assertEqual(readable.returncode, 0, readable.stderr)
+                    for filename in (original, renamed, untracked):
+                        self.assertIn(json.dumps(os.fsdecode(filename)), readable.stdout)
+                    default = subprocess.run(command + args, capture_output=True, text=True)
+                    explicit = subprocess.run(command + args + ["--json"], capture_output=True, text=True)
+                    self.assertEqual(default.returncode, 0, default.stderr)
+                    self.assertEqual(default.stdout, explicit.stdout)
+                self.assertEqual(before, (record.read_bytes(), index.read_bytes()))
+
+    def test_changed_files_decodes_raw_git_stream_without_losing_bytes(self):
+        payload = b"R  new-\xff\r\n.txt\0old-\xfe\r.txt\0?? untracked-\xff\r.txt\0"
+        def stream(args, **kwargs):
+            return run([sys.executable, "-c", f"import os; os.write(1, {payload!r})"], **kwargs)
+        with patch("agent_hub.work.run", side_effect=stream):
+            files = work.changed_files(self.repo)
+        self.assertEqual(files[0]["status"], "R ")
+        self.assertEqual(os.fsencode(files[0]["path"]), b"new-\xff\r\n.txt")
+        self.assertEqual(os.fsencode(files[0]["original_path"]), b"old-\xfe\r.txt")
+        self.assertEqual(os.fsencode(files[1]["path"]), b"untracked-\xff\r.txt")
+        row = {"id": "W-fixture", "title": "Byte paths", "status": "prepared", "sessions": [],
+               "repos": {"alpha": {"present": True, "branch": "task", "dirty": True, "changed_files": files}}}
+        output = human.status([row])
+        for name in (b"new-\xff\r\n.txt", b"old-\xfe\r.txt", b"untracked-\xff\r.txt"):
+            self.assertIn(json.dumps(os.fsdecode(name)), output)
+
     def test_human_status_guidance_tracks_lifecycle_and_session_limits(self):
         self.assertIn("No recorded work", human.status(work.status(self.config, details=True)))
         unit = work.create(self.config, "Bounded task", "Inspect fixture", ["alpha"], "Inspect state")
