@@ -15,6 +15,11 @@ description = "Attach an existing checkout; opt in to cloning with checkout = tr
 # environment_dirs = ["NPM_CONFIG_CACHE"]
 # timeout = 300
 
+# Optional; run with `hub work check <id>` or inspect with `--plan`.
+# [repos.checks]
+# commands = [["python3", "-m", "unittest", "discover", "-s", "tests", "-v"]]
+# timeout = 300
+
 [[repos]]
 name = "agent-hub"
 folder = "agent-hub"

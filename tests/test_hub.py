@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_hub import agents, context, evolution, human, prune, repos, security, setup, work
+from agent_hub import agents, checks, context, evolution, human, prune, repos, security, setup, work
 from agent_hub.cli import service
 from agent_hub.common import CORE, HubError, git, read_json, run, save, toml_string, write
 from agent_hub.config import Config
@@ -82,6 +82,284 @@ class HubTests(unittest.TestCase):
         text += "timeout = " + str(timeout) + "\n"
         write(path, text)
         self.config = Config(self.instance)
+
+    def checks_config(self, commands=None, timeout=300):
+        path = self.instance / "local.toml"
+        text = path.read_text().split("\n[repos.alpha.checks]")[0]
+        text += "\n[repos.alpha.checks]\ncommands = " + json.dumps(commands or []) + "\n"
+        text += "timeout = " + str(timeout) + "\n"
+        write(path, text)
+        self.config = Config(self.instance)
+
+    def test_checks_run_independently_of_unavailable_setup_and_store_actual_receipts(self):
+        self.setup_config([["missing-setup-executable"]], [("missing-settings", ".settings")], ["TOOL_CACHE"])
+        self.checks_config([[sys.executable, "-c", "import os; from pathlib import Path; "
+                            "p=Path(os.environ['TOOL_CACHE']); (p/'marker').touch(); Path('generated').write_text('fixture')"]])
+        unit = self.unit()
+        with patch("agent_hub.setup.execute") as implicit_setup:
+            result = checks.execute(self.config, unit["id"], compare_base=True)
+            implicit_setup.assert_not_called()
+        self.assertTrue(result["passed"])
+        entry = result["repos"][0]
+        self.assertEqual(entry["commands"][0]["exit_code"], 0)
+        self.assertNotIn("baseline", entry)
+        self.assertIn("generated", entry["observed_changes"])
+        self.assertEqual(read_json(Path(result["receipt"]))["run"], result["run"])
+        latest = work.load(self.config, unit["id"])["checks"]["alpha"]
+        self.assertEqual(latest["receipt"], result["receipt"])
+        self.assertTrue(latest["passed"])
+        self.assertNotIn("stdout", json.dumps(result))
+        self.assertNotIn("checks", work.status(self.config, unit["id"])[0]["repos"]["alpha"])
+        self.assertIn("Checks: passed", human.status(work.status(self.config, unit["id"], details=True)))
+
+    def test_checks_plan_skip_and_missing_never_claim_pass(self):
+        self.checks_config([[sys.executable, "-c", "from pathlib import Path; Path('ran').touch()"]])
+        unit = self.unit()
+        tree = work.location(self.config, unit["id"], "alpha")
+        before = work.record_path(self.config, unit["id"]).read_bytes()
+        result = checks.execute(self.config, unit["id"], plan=True, compare_base=True)
+        self.assertIsNone(result["passed"])
+        self.assertEqual(before, work.record_path(self.config, unit["id"]).read_bytes())
+        self.assertFalse((work.location(self.config, unit["id"]) / ".checks").exists())
+        skipped = checks.execute(self.config, unit["id"], skip=True, compare_base=True)
+        self.assertIsNone(skipped["passed"])
+        self.assertEqual(skipped["repos"][0]["state"], "skipped")
+        self.assertFalse((tree / "ran").exists())
+        self.assertNotIn("baseline", skipped["repos"][0])
+        self.checks_config([])
+        missing = checks.execute(self.config, unit["id"])
+        self.assertFalse(missing["passed"])
+        self.assertEqual(missing["repos"][0]["state"], "unconfigured")
+        output = human.status(work.status(self.config, unit["id"], details=True))
+        self.assertIn("Checks: unconfigured", output)
+        self.assertIn("resolve verification failures", output)
+
+    def test_checks_continue_after_failures_and_observe_preexisting_dirty_and_ignored_files(self):
+        write(self.repo / ".gitignore", ".generated/\n")
+        commit(self.repo)
+        self.checks_config([[sys.executable, "-c", "from pathlib import Path; Path('example.txt').write_text('changed again and longer'); raise SystemExit(7)"],
+                            [sys.executable, "-c", "from pathlib import Path; Path('.generated').mkdir(); Path('.generated/ignored').write_text('fixture')"]])
+        unit = self.unit()
+        tree = work.location(self.config, unit["id"], "alpha")
+        (tree / "example.txt").write_text("already dirty")
+        result = checks.execute(self.config, unit["id"])
+        self.assertFalse(result["passed"])
+        entry = result["repos"][0]
+        self.assertEqual([s["exit_code"] for s in entry["commands"]], [7, 0])
+        self.assertIn("example.txt", entry["commands"][0]["observed_changes"])
+        self.assertTrue(any(p.startswith(".generated") for p in entry["observed_changes"]))
+        self.assertEqual((tree / ".generated/ignored").read_text(), "fixture")
+        self.assertEqual((self.repo / "example.txt").read_text(), "original\n")
+
+    def test_checks_missing_executable_timeout_and_binary_output_have_honest_results(self):
+        message = b"fixture-process-output"
+        self.checks_config([[str(self.root / "missing-tool")],
+                            [sys.executable, "-c", "import time; time.sleep(5)"],
+                            [sys.executable, "-c", f"import os; os.write(1,bytes([255])); os.write(2,bytes({list(message)}))"]], timeout=1)
+        unit = self.unit()
+        result = checks.execute(self.config, unit["id"])
+        self.assertFalse(result["passed"])
+        steps = result["repos"][0]["commands"]
+        self.assertEqual([s["state"] for s in steps], ["failed", "failed", "passed"])
+        self.assertEqual([s["exit_code"] for s in steps], [None, None, 0])
+        self.assertNotIn(message.decode(), json.dumps(result))
+
+    def test_checks_aggregate_multiple_repository_outcomes(self):
+        self.checks_config([[sys.executable, "-c", "from pathlib import Path; Path('checked').touch()"]])
+        beta = repository(self.root / "beta")
+        self.register((self.instance / "repos.toml").read_text() + '\n[[repos]]\nname="beta"\nremote="https://github.com/example/beta.git"\n')
+        with (self.instance / "local.toml").open("a") as stream:
+            stream.write('\n[repos.beta.checks]\ncommands=' + json.dumps([[sys.executable, "-c", "from pathlib import Path; Path('checked').touch(); raise SystemExit(6)"]]) + '\n')
+        self.config = Config(self.instance)
+        unit = self.unit(["alpha", "beta"])
+        result = checks.execute(self.config, unit["id"])
+        self.assertFalse(result["passed"])
+        self.assertEqual([entry["state"] for entry in result["repos"]], ["passed", "failed"])
+        self.assertEqual(set(work.load(self.config, unit["id"])["checks"]), {"alpha", "beta"})
+        for name in ("alpha", "beta"):
+            self.assertTrue((work.location(self.config, unit["id"], name) / "checked").exists())
+        self.assertFalse((self.repo / "checked").exists())
+        self.assertFalse((beta / "checked").exists())
+
+    def test_checks_zero_exit_does_not_pass_after_worktree_identity_changes(self):
+        self.checks_config([[sys.executable, "-c", "import subprocess; subprocess.run(['git','checkout','-b','unexpected'],check=True)"]])
+        unit = self.unit()
+        result = checks.execute(self.config, unit["id"])
+        self.assertFalse(result["passed"])
+        entry = result["repos"][0]
+        self.assertEqual(entry["commands"][0]["exit_code"], 0)
+        self.assertIn("Worktree branch changed", entry["problem"])
+
+    def test_checks_scope_preflight_and_hidden_receipt_namespace_preserve_other_repositories(self):
+        self.checks_config([[sys.executable, "-c", "from pathlib import Path; Path('checked').touch()"]])
+        repository(self.root / "checks")
+        registry = (self.instance / "repos.toml").read_text()
+        self.register(registry + '\n[[repos]]\nname="checks"\nremote="https://github.com/example/checks.git"\n')
+        unit = self.unit(["alpha", "checks"])
+        other = work.location(self.config, unit["id"], "checks")
+        original = git(other, "status", "--porcelain", "--ignored=matching")
+        before = work.record_path(self.config, unit["id"]).read_bytes()
+        with self.assertRaises(HubError):
+            checks.execute(self.config, unit["id"], ["outside"])
+        self.assertEqual(before, work.record_path(self.config, unit["id"]).read_bytes())
+        result = checks.execute(self.config, unit["id"], ["alpha"])
+        self.assertTrue(result["passed"])
+        self.assertFalse(Path(result["receipt"]).is_relative_to(other))
+        self.assertEqual(original, git(other, "status", "--porcelain", "--ignored=matching"))
+        self.assertEqual(set(work.load(self.config, unit["id"])["checks"]), {"alpha"})
+        git(other, "checkout", "-b", "unexpected")
+        before = work.record_path(self.config, unit["id"]).read_bytes()
+        with self.assertRaises(HubError):
+            checks.execute(self.config, unit["id"])
+        self.assertEqual(before, work.record_path(self.config, unit["id"]).read_bytes())
+
+    def test_checks_cli_pass_failure_skip_and_source_key(self):
+        self.checks_config([[sys.executable, "-c", "pass"]])
+        unit = work.create(self.config, "Check fixture", "Verify fixture", ["alpha"], "Inspect results", {"provider": "manual", "key": "APP-24"})
+        work.prepare(self.config, unit["id"])
+        command = [sys.executable, str(CORE / "bin/hub"), "--instance", str(self.instance), "work", "check", "APP-24"]
+        for args in (["--plan"], [], ["--skip"]):
+            result = subprocess.run(command + args, capture_output=True, text=True)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertIs(json.loads(result.stdout)["passed"], True if not args else None)
+        self.checks_config([[sys.executable, "-c", "raise SystemExit(4)"]])
+        failed = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(failed.returncode, 1)
+        self.assertFalse(json.loads(failed.stdout)["passed"])
+        self.checks_config([])
+        missing = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(missing.returncode, 1)
+
+    def test_checks_baseline_pass_never_overrides_candidate_failure_or_resets_checkout(self):
+        self.checks_config([[sys.executable, "-c", "from pathlib import Path; raise SystemExit(0 if Path('example.txt').read_text() == 'original\\n' else 8)"]])
+        unit = self.unit()
+        tree = work.location(self.config, unit["id"], "alpha")
+        (tree / "example.txt").write_text("candidate change")
+        (self.repo / "example.txt").write_text("operator's unfinished ordinary work")
+        (self.repo / "ordinary-note").write_text("preserve untracked note")
+        index = Path(git(self.repo, "rev-parse", "--path-format=absolute", "--git-path", "index"))
+        before = (git(self.repo, "rev-parse", "HEAD"), (self.repo / "example.txt").read_bytes(), git(self.repo, "symbolic-ref", "HEAD"), index.read_bytes())
+        result = checks.execute(self.config, unit["id"], compare_base=True)
+        self.assertFalse(result["passed"])
+        baseline = result["repos"][0]["baseline"]
+        self.assertTrue(baseline["passed"])
+        self.assertEqual(baseline["comparison"], "base-passed")
+        self.assertFalse(baseline["retained"])
+        self.assertFalse(Path(baseline["directory"]).exists())
+        self.assertEqual(before, (git(self.repo, "rev-parse", "HEAD"), (self.repo / "example.txt").read_bytes(), git(self.repo, "symbolic-ref", "HEAD"), index.read_bytes()))
+        self.assertEqual((self.repo / "ordinary-note").read_text(), "preserve untracked note")
+        self.assertEqual((tree / "example.txt").read_text(), "candidate change")
+        self.assertNotIn(baseline["directory"], git(self.repo, "worktree", "list", "--porcelain"))
+
+    def test_checks_baseline_keeps_artifacts_and_uses_a_separate_tool_cache(self):
+        write(self.repo / ".gitignore", ".outputs/\n")
+        commit(self.repo)
+        self.setup_config(environment_dirs=["TOOL_CACHE"])
+        self.checks_config([[sys.executable, "-c", "import os; from pathlib import Path; "
+                            "p=Path(os.environ['TOOL_CACHE']); (p/'observed').write_text(str((p/'marker').exists())); (p/'marker').touch(); "
+                            "Path('.outputs').mkdir(); Path('.outputs/file').write_text('preserve'); raise SystemExit(9)"]])
+        unit = self.unit()
+        result = checks.execute(self.config, unit["id"], compare_base=True)
+        entry = result["repos"][0]
+        baseline = entry["baseline"]
+        self.assertFalse(result["passed"])
+        self.assertEqual(baseline["comparison"], "both-failed")
+        self.assertTrue(baseline["retained"])
+        self.assertEqual((Path(baseline["directory"]) / ".outputs/file").read_text(), "preserve")
+        base_cache = Path(result["receipt"]).parent / "alpha/environment/TOOL_CACHE"
+        candidate_cache = setup.environment_paths(self.config, unit["id"], "alpha", ["TOOL_CACHE"])["TOOL_CACHE"]
+        self.assertEqual((base_cache / "observed").read_text(), "False")
+        self.assertEqual((candidate_cache / "observed").read_text(), "False")
+        self.assertNotEqual(base_cache, candidate_cache)
+        self.assertIn("do not prove causality", baseline["interpretation"])
+        skipped = checks.execute(self.config, unit["id"], skip=True)
+        self.assertNotEqual(skipped["run"], result["run"])
+        self.assertTrue(Path(result["receipt"]).is_file())
+        self.assertEqual((Path(baseline["directory"]) / ".outputs/file").read_text(), "preserve")
+
+    def test_checks_baseline_retains_hidden_index_changes(self):
+        self.checks_config([[sys.executable, "-c", "import subprocess; from pathlib import Path; "
+                            "subprocess.run(['git','update-index','--assume-unchanged','example.txt'],check=True); "
+                            "Path('example.txt').write_text('hidden change'); raise SystemExit(1)"]])
+        unit = self.unit()
+        result = checks.execute(self.config, unit["id"], compare_base=True)
+        baseline = result["repos"][0]["baseline"]
+        self.assertTrue(baseline["retained"])
+        self.assertIn("index entries", baseline["cleanup"])
+        self.assertEqual((Path(baseline["directory"]) / "example.txt").read_text(), "hidden change")
+
+    def test_checks_baseline_unavailable_is_not_inferred_as_a_pass(self):
+        self.checks_config([[sys.executable, "-c", "raise SystemExit(3)"]])
+        unit = self.unit()
+        unit = work.load(self.config, unit["id"])
+        unit["repos"]["alpha"]["base"] = "f" * 40
+        work.persist(self.config, unit)
+        result = checks.execute(self.config, unit["id"], compare_base=True)
+        self.assertFalse(result["passed"])
+        baseline = result["repos"][0]["baseline"]
+        self.assertIsNone(baseline["passed"])
+        self.assertEqual(baseline["comparison"], "unavailable")
+        self.assertFalse(baseline["retained"])
+
+    def test_checks_interrupt_retains_baseline_and_records_selected_scope(self):
+        self.checks_config([[sys.executable, "-c", "raise SystemExit(1)"]])
+        unit = self.unit()
+        invocations = 0
+        def interrupt_baseline(args, **kwargs):
+            nonlocal invocations
+            if args[0] == sys.executable:
+                invocations += 1
+                if invocations == 2:
+                    raise KeyboardInterrupt
+            return run(args, **kwargs)
+        with patch("agent_hub.checks.run", side_effect=interrupt_baseline), self.assertRaises(KeyboardInterrupt):
+            checks.execute(self.config, unit["id"], compare_base=True)
+        latest = work.load(self.config, unit["id"])["checks"]["alpha"]
+        receipt = read_json(Path(latest["receipt"]))
+        self.assertFalse(receipt["passed"])
+        self.assertEqual(receipt["selected_repositories"], ["alpha"])
+        baseline = receipt["repos"][0]["baseline"]
+        self.assertEqual(baseline["state"], "interrupted")
+        self.assertTrue(baseline["retained"])
+        self.assertTrue(Path(baseline["directory"]).exists())
+
+    def test_checks_snapshot_limits_and_unsafe_metadata_or_active_sessions(self):
+        self.checks_config([[sys.executable, "-c", "pass"]])
+        unit = self.unit()
+        tree = work.location(self.config, unit["id"], "alpha")
+        for number in range(205):
+            (tree / f"generated-{number}").touch()
+        result = checks.execute(self.config, unit["id"])
+        observed = result["repos"][0]["files_after"]
+        self.assertTrue(observed["truncated"])
+        self.assertEqual(observed["total"], 205)
+        self.assertEqual(len(observed["files"]), 200)
+        outside = self.root / "outside-receipts"
+        outside.mkdir()
+        other = self.unit()
+        (work.location(self.config, other["id"]) / ".checks").symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(HubError):
+            checks.execute(self.config, other["id"])
+        self.assertEqual(list(outside.iterdir()), [])
+        unit = work.load(self.config, unit["id"])
+        for state in ("running", "interrupted"):
+            unit["sessions"] = [{"id": "session", "status": state}]
+            work.persist(self.config, unit)
+            for mode in ({}, {"plan": True}, {"skip": True}):
+                with self.assertRaises(HubError):
+                    checks.execute(self.config, unit["id"], **mode)
+
+    def test_checks_config_validation_and_local_overrides(self):
+        for value in ("command", {"commands": "run"}, {"commands": [[]]}, {"commands": [[1]]},
+                      {"timeout": 0}, {"timeout": True}, {"links": []}, {"unknown": True}):
+            with self.subTest(value=value), self.assertRaises(HubError):
+                checks.configuration(value)
+        text = (self.instance / "repos.toml").read_text()
+        text += '\n[repos.checks]\ncommands=[["shared-tool","check"]]\ntimeout=17\n'
+        self.register(text)
+        self.checks_config([[sys.executable, "-c", "pass"]], timeout=23)
+        self.assertEqual(self.config.repo("alpha")["checks"]["timeout"], 23)
+        self.assertEqual(self.config.repo("alpha")["checks"]["commands"][0][0], sys.executable)
 
     def test_setup_preview_skip_and_unconfigured_do_not_run_commands(self):
         unit = self.unit()

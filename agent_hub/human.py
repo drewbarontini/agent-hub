@@ -34,6 +34,8 @@ def next_action(row):
     if state == "prepared" and any(r.get("setup", {}).get("state") in {
             "not-run", "failed", "configuration-changed", "invalid-receipt"} for r in repos):
         return f"Inspect setup state; preview hub work setup {identifier}."
+    if any(r.get("checks", {}).get("state") in {"failed", "unconfigured", "interrupted", "invalid-receipt"} for r in repos):
+        return "Inspect the last check receipt and resolve verification failures before reporting completion."
     if state == "review":
         return f"Review outcome and verification; after merge, preview hub work prune {identifier}."
     if state == "prepared":
@@ -86,6 +88,8 @@ def status(result):
                 setup_state = text(repo["setup"]["state"])
                 qualifier = " (last run; application checks not run)" if repo["setup"].get("ready") is True else " (readiness unverified)"
                 lines.append(f"    Setup: {setup_state}{qualifier}")
+            if "checks" in repo:
+                lines.append(f"    Checks: {text(repo['checks']['state'])} (last recorded result)")
             files = repo.get("changed_files", [])
             for item in files[:8]:
                 path = json.dumps(item["path"], ensure_ascii=True)

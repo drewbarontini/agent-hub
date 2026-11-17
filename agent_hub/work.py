@@ -11,7 +11,7 @@ from pathlib import Path
 
 from .common import HubError, child, git, read_json, run, save, slug, write
 from .repos import available, guard
-from . import setup
+from . import checks, setup
 
 
 def now():
@@ -281,9 +281,11 @@ def validate_tree(config, unit, name):
     return path
 
 
-def changed_files(path):
-    output = run(["git", "--no-optional-locks", "-C", path, "status", "--porcelain=v1", "-z",
-                  "--untracked-files=all"], text=False).stdout.split(b"\0")
+def changed_files(path, *, ignored=False):
+    args = ["git", "--no-optional-locks", "-C", path, "status", "--porcelain=v1", "-z", "--untracked-files=all"]
+    if ignored:
+        args.append("--ignored=matching")
+    output = run(args, text=False).stdout.split(b"\0")
     files = []
     fields = iter(output)
     for field in fields:
@@ -320,6 +322,9 @@ def status(config, identifier=None, *, details=False):
                 observed_setup = setup.observation(config, unit, name)
                 if config.repo(name).get("setup") or observed_setup["state"] != "unconfigured":
                     info["setup"] = observed_setup
+                observed_checks = checks.observation(config.repo(name), unit, name)
+                if observed_checks["state"] != "unconfigured" or observed_checks.get("passed") is False:
+                    info["checks"] = observed_checks
             if info["present"]:
                 try:
                     validate_tree(config, unit, name)

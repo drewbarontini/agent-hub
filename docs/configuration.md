@@ -88,6 +88,31 @@ lists. For example, `commands = []` disables shared dependency commands without
 discarding the other setup settings. Neither configuration nor a preview runs
 commands; see [setup operations](operations.md#repository-setup).
 
+## Repository checks
+
+Checks are opt-in argument arrays below a repository's `[[repos]]` entry:
+
+```toml
+[repos.checks]
+commands = [["python3", "-m", "unittest", "discover", "-s", "tests", "-v"]]
+timeout = 300
+```
+
+Use `[repos.<name>.checks]` in Hub config, an overlay or `local.toml` for overrides.
+Tables merge; command lists replace inherited lists. The timeout is per command,
+from 1 to 3600 seconds, defaulting to 300. Every configured command runs even if
+an earlier command fails, unless execution is interrupted or worktree identity
+can no longer be verified. Empty or missing commands mean unconfigured verification.
+
+Checks never run automatically during preparation, setup, resume or reporting.
+They use the same trusted-command boundary as setup: operator permissions and
+inherited environment, without an implicit shell or OS sandbox. Do not put secrets
+in arguments. Configured setup `environment_dirs` are supplied as scoped tool
+directories, but dependency commands and settings links are never applied implicitly.
+Basic checks therefore remain usable when setup is unconfigured or unavailable.
+Baseline diagnostics use separate empty tool directories, without copying settings
+or dependencies from the candidate. See [verification operations](operations.md#repository-verification).
+
 Resources use `[[resources]]` entries:
 
 | Field | Meaning |

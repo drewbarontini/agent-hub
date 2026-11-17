@@ -10,7 +10,7 @@ from pathlib import Path
 from . import __version__
 from .common import CORE, HubError, git, redact, run, save, sanitize
 from .config import Config
-from . import agents, context, evolution, human, prune, repos, security, setup, work
+from . import agents, checks, context, evolution, human, prune, repos, security, setup, work
 
 
 def parser():
@@ -79,6 +79,13 @@ def parser():
     action = r.add_mutually_exclusive_group()
     action.add_argument("--apply", action="store_true")
     action.add_argument("--skip", action="store_true", help="Record skipped setup without running commands or linking settings")
+    r = sub.add_parser("check", help="Run configured repository checks and record results")
+    r.add_argument("id")
+    r.add_argument("--repo", action="append", help="Select an execution repository; repeat as needed")
+    mode = r.add_mutually_exclusive_group()
+    mode.add_argument("--plan", action="store_true", help="Inspect configured commands without execution")
+    mode.add_argument("--skip", action="store_true", help="Record skipped verification without running checks")
+    r.add_argument("--baseline", action="store_true", help="Compare failures with checks in isolated recorded-base worktrees")
     r = sub.add_parser("prune", help="Assess recorded work for safe cleanup; dry run by default")
     r.add_argument("id", nargs="?", help="Optional execution ID; default assesses all records")
     r.add_argument("--apply", action="store_true", help="Remove eligible worktrees after fresh checks")
@@ -198,6 +205,8 @@ def dispatch(args):
             return work.status(config, args.id, details=args.human)
         if args.action == "setup":
             return setup.execute(config, args.id, args.repo, apply=args.apply, skip=args.skip)
+        if args.action == "check":
+            return checks.execute(config, args.id, args.repo, plan=args.plan, skip=args.skip, compare_base=args.baseline)
         if args.action == "cleanup":
             return work.cleanup(config, args.id, args.apply)
         if args.action == "report":
