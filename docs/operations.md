@@ -160,7 +160,8 @@ is configured. Service output can itself contain sensitive data: inspect the
 registered command and its own logging. Logs belong to the terminal or the service;
 v0.1 has no background supervisor, PID manager or production connectivity inference.
 
-Data Desk can be a hidden registered repository, a capability reference, or an
-explicit service. Its data sources, schemas, credentials and reporting workflows
-stay with Data Desk. Hub does not reimplement or ingest them.
+A data repository can be registered as a hidden repository, referenced as a
+capability, or exposed through an explicit service. Its data sources, schemas,
+credentials and reporting workflows remain under its owner's control. Hub does not
+reimplement or ingest them.
 

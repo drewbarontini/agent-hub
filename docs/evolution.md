@@ -67,7 +67,7 @@ to an approved location when a saved report is wanted. Reconciliation is read-on
    guard and instruction behavior. Note ticket conventions, external work providers,
    native agent hooks, skills and MCP configuration without exporting their contents.
 3. Compare with Core. Preserve private repositories, team policies, work-provider
-   ownership, Data Desk and personal overlay references in approved locations.
+   ownership, data repository and personal overlay references in approved locations.
 4. Initialize a new Instance alongside the existing Hub. Pin Core and translate
    configuration. Keep the existing Claude runtime until a separately tested adapter
    meets its native permission and instruction requirements.
@@ -78,8 +78,8 @@ to an approved location when a saved report is wanted. Reconciliation is read-on
    pass parity checks. Roll back by restoring the existing entry points and commit;
    do not delete old worktrees or move private context during migration.
 
-This is the intended path for a Scite Team Instance with an individual approved
-OneDrive overlay. v0.1 does not perform that migration or claim private access.
+This is the intended path for a Team Instance with a personal overlay in an
+approved location. v0.1 does not perform that migration or claim private access.
 
 ## Promote: Instance → Core
 

@@ -220,7 +220,7 @@ def reconcile(config, inventory=None):
             "core_commit": config.lock["commit"], "differences": rows,
             "provider_concerns": ["Codex launch adapter implemented; verify local sandbox enforcement",
                                   "Claude native hooks, permissions, MCP and session launch require separate validation"],
-            "privacy": "Keep private repos, Linear, Data Desk and personal context references with their owner",
+            "privacy": "Keep private repositories, work sources, data repositories and personal context references with their owner",
             "migration_sequence": ["Inventory and authorize inspection", "Preserve existing Hub and record its commit",
                                    "Initialize independent Instance using pinned Core", "Translate configuration and local overlay references",
                                    "Validate clone, attach, worktrees, guards, services and agent instructions",
