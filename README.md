@@ -139,6 +139,7 @@ bounded requirements. See [operations](docs/operations.md#bounded-work).
 | Initialization, attach/clone, visibility, workspace, diagnostics | Implemented and covered by Git integration tests |
 | Multi-repository worktrees, cleanup checks, optional branch hooks | Implemented and tested with disposable repositories |
 | Explicit repository setup | Preview/apply/skip, settings links and tool directories; cleanup retains all artifacts until explicitly removed |
+| Repository verification | Explicit scoped checks with command/file receipts and optional detached-base diagnostics; dirty baselines are retained |
 | Merged-work assessment and optional branch deletion | Explicit `work prune` with live origin proof; optional GitHub PR evidence recognizes squash merges while retaining original branches |
 | Codex launch plans, leases and outcome handoffs | Implemented; real launch requires supported Codex permissions and host sandbox |
 | Codex filesystem enforcement on this development host | Nested sandbox creation is blocked; native CLI end-to-end execution is unverified here |

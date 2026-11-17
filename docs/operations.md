@@ -189,6 +189,54 @@ and generated dependencies. Inspect and explicitly remove disposable artifacts
 before retrying cleanup; unmanaged files inside dependency directories must be
 preserved. Cache directories outside repository worktrees and receipts remain.
 
+## Repository verification
+
+After configuring [repository checks](configuration.md#repository-checks), invoke
+verification explicitly for the execution's task worktrees:
+
+```sh
+hub work check APP-123 --plan
+hub work check APP-123 --repo frontend
+hub work check APP-123 --baseline
+hub work check APP-123 --skip
+hub work status APP-123 --human
+```
+
+`work check` runs checks; `--plan` previews commands without creating a receipt or
+changing lifecycle state. `--repo` selects only repositories in that execution;
+omit it to check all. Selected worktrees and configured tool-directory paths are
+validated before execution. Running/interrupted Worker sessions block checks.
+`--skip` records a deliberate skip without running processes or baselines.
+
+`passed: true` requires every configured check in every selected repository to
+exit zero with observations collected from the expected worktrees. Missing
+configuration, a missing executable, timeout or failure returns nonzero and
+`passed: false`; skipped verification has `passed: null`. A passing baseline never
+overrides candidate failure. Human status displays the last recorded check result,
+not a claim that later edits have been verified.
+
+Each run saves sanitized command/state/exit evidence and before/after Git status
+observations in `.hub/worktrees/<id>/.checks/<run>/receipt.json`; execution metadata
+points to the latest result per repository. Earlier receipts remain available.
+Process output and file contents are not stored. Observations include file
+metadata and up to 200 paths per snapshot, with a total count and explicit truncation; ignored
+directories may summarize their contents. These are net observations, not a
+complete filesystem audit or proof of which process caused a change. Checks leave
+generated and changed files in place for review.
+
+`--baseline` runs the same configured checks for failed repositories in detached
+worktrees at their recorded bases. It never resets ordinary checkouts, installs
+dependencies or links settings. Baseline environments may differ, so matching exit
+results cannot prove causality or establish that a failure was already present.
+Unavailable bases and incomplete local history are reported as diagnostic limits.
+
+Clean baselines are removed only after repository/root identity, detached base
+HEAD, index flags and tracked/untracked/ignored changes are checked, using ordinary
+Git removal without force. Dirty or interrupted baselines remain at the directory
+recorded in their receipt for inspection; earlier retained baselines remain even
+when a later check runs. No branches or ordinary checkout contents are deleted.
+Canonical verification and completion logging remain separate operator duties.
+
 ## Canonical completion logging
 
 Before reporting completed implementation, log the outcome in the Instance's
