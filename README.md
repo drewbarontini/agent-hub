@@ -107,10 +107,9 @@ The workspace is their environment, not another agent role.
 hub agent orchestrator --launch
 # In another terminal, repeat the PATH setup from the Instance root first:
 export PATH="$PWD/.hub/bin:$PATH"
-hub work create --title "Inspect project" \
+hub work start --title "Inspect project" \
   --intent "Investigate the configured test command; change no application code" \
   --repo example --verify "Record the command and its actual result"
-hub work prepare W-REPLACE_WITH_ID
 hub sandbox-check W-REPLACE_WITH_ID
 hub agent worker W-REPLACE_WITH_ID --launch
 hub work report W-REPLACE_WITH_ID \
@@ -123,7 +122,9 @@ execution. Local session logs contain lifecycle event types and exit codes only.
 Execution records and temporary handoffs stay ignored and machine-local; canonical
 requirements, outcomes and verification stay in the configured work source.
 Create a local execution record only when execution needs it. An agent session is
-not a work unit.
+not a work unit. For ticket-based work, `hub work start APP-123` can resume an
+existing execution; the first start also needs the resolved source identity and
+bounded requirements. See [operations](docs/operations.md#bounded-work).
 
 ## Boundaries and current support
 

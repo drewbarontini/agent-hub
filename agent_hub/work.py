@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import re
+import shlex
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -65,7 +66,30 @@ def location(config, identifier, name=None):
     return child(root, slug(name)) if name else root
 
 
+def units(config):
+    return [load(config, p.parent.name)
+            for p in sorted((config.root / "work").glob("*/unit.json"))]
+
+
+def resolve(config, reference):
+    """Resolve a recorded execution ID or one unambiguous human source key."""
+    slug(reference)
+    if record_path(config, reference).exists():
+        return load(config, reference)["id"]
+    matches = [u["id"] for u in units(config) if (u.get("source") or {}).get("key") == reference]
+    if len(matches) > 1:
+        raise HubError("Ambiguous source key; use an execution ID: " + ", ".join(matches))
+    if not matches:
+        raise HubError("No recorded work matches this reference; resolve the source ticket before starting work")
+    return matches[0]
+
+
 def create(config, title, intent, names, verification, source=None, resource_names=None):
+    with mutation(config):
+        return _create(config, title, intent, names, verification, source, resource_names)
+
+
+def _create(config, title, intent, names, verification, source=None, resource_names=None):
     if not title.strip() or not intent.strip() or not verification.strip():
         raise HubError("Title, intent, and verification criteria are required")
     names = list(dict.fromkeys(names))
@@ -74,6 +98,8 @@ def create(config, title, intent, names, verification, source=None, resource_nam
     known = {r["name"] for r in config.resources}
     if set(resource_names or []) - known:
         raise HubError("Unknown work context resource")
+    if (source or {}).get("key"):
+        slug(source["key"])
     identifier = "W-" + uuid.uuid4().hex[:12]
     unit = {"schema_version": 1, "id": identifier, "title": title, "intent": intent,
             "verification_criteria": verification, "source": source or {"provider": "manual"},
@@ -83,37 +109,119 @@ def create(config, title, intent, names, verification, source=None, resource_nam
         repo = config.repo(name)
         unit["repos"][name] = {"branch": branch_name(unit, name),
                                "base": git(repo["path"], "rev-parse", "refs/heads/" + repo["default_branch"])}
-    with mutation(config):
-        persist(config, unit)
+    persist(config, unit)
     return unit
 
 
 def prepare(config, identifier):
     with mutation(config):
-        unit = load(config, identifier)
-        if any(s["status"] == "running" for s in unit["sessions"]):
-            raise HubError("Cannot prepare work with a running session")
-        if unit["status"] not in {"planned", "prepared"}:
-            raise HubError("Only planned or prepared work can be prepared")
-        root = location(config, identifier)
-        root.mkdir(parents=True, exist_ok=True)
-        for name, entry in unit["repos"].items():
-            repo = config.repo(name)
-            available(repo)
-            path = location(config, identifier, name)
-            if path.exists():
+        return _prepare(config, load(config, identifier))
+
+
+def _prepare(config, unit):
+    identifier = unit["id"]
+    if any(s["status"] == "running" for s in unit["sessions"]):
+        raise HubError("Cannot prepare work with a running session")
+    if unit["status"] not in {"planned", "prepared"}:
+        raise HubError("Only planned or prepared work can be prepared")
+    root = location(config, identifier)
+    root.mkdir(parents=True, exist_ok=True)
+    for name, entry in unit["repos"].items():
+        repo = config.repo(name)
+        available(repo)
+        path = location(config, identifier, name)
+        if path.exists():
+            validate_tree(config, unit, name)
+            continue
+        # Never reuse an existing branch with ambiguous history.
+        exists = run(["git", "-C", repo["path"], "show-ref", "--verify", "--quiet", "refs/heads/" + entry["branch"]], check=False)
+        if exists.returncode == 0:
+            raise HubError("Task branch already exists without its recorded worktree; inspect manually")
+        run(["git", "-C", repo["path"], "worktree", "add", "-b", entry["branch"], path, entry["base"]])
+    write(root / "AGENTS.md", worker_instructions(config, unit))
+    write(root / "CLAUDE.md", "@AGENTS.md\n")
+    unit["status"] = "prepared"
+    persist(config, unit)
+    return {"id": identifier, "directory": str(root), "status": unit["status"]}
+
+
+def start(config, reference=None, *, title=None, intent=None, names=None,
+          verification=None, source=None, resource_names=None):
+    source = {k: v for k, v in (source or {}).items() if v is not None}
+    if reference:
+        slug(reference)
+    if source.get("key"):
+        slug(source["key"])
+    if source.get("id") and not source.get("provider"):
+        raise HubError("An immutable source ID requires --source-provider")
+    # Selection, record creation and preparation share one lock so repeated starts
+    # cannot create duplicate executions while another process is preparing one.
+    with mutation(config):
+        records = units(config)
+        by_reference = [u for u in records if reference and u["id"] == reference]
+        if reference and not by_reference:
+            by_reference = [u for u in records if (u.get("source") or {}).get("key") == reference]
+        by_identity = [u for u in records if source.get("id") and
+                       all((u.get("source") or {}).get(k) == source[k] for k in ("provider", "id"))]
+        by_key = [u for u in records if source.get("key") and
+                  (u.get("source") or {}).get("key") == source["key"]]
+        for matches in (by_reference, by_identity, by_key):
+            if len(matches) > 1:
+                raise HubError("Ambiguous work reference; use an execution ID and inspect duplicate source records")
+        candidates = {u["id"]: u for u in by_reference + by_identity + by_key}
+        if len(candidates) > 1:
+            raise HubError("Source identity and work reference identify different executions")
+        reused = bool(candidates)
+        if reused:
+            unit = next(iter(candidates.values()))
+            recorded_source = unit.get("source") or {}
+            for field in ("provider", "id"):
+                if source.get(field) is not None and source[field] != recorded_source.get(field):
+                    raise HubError("Source identity differs from recorded work; inspect before resuming")
+            if names is not None and set(names) != set(unit["repos"]):
+                raise HubError("Repository scope differs from recorded work; inspect before resuming")
+            if resource_names is not None and set(resource_names) != set(unit["resources"]):
+                raise HubError("Context scope differs from recorded work; inspect before resuming")
+            for value, field in ((title, "title"), (intent, "intent"), (verification, "verification_criteria")):
+                if value is not None and value != unit[field]:
+                    raise HubError("Work requirements differ from the record; reconcile them explicitly before resuming")
+            if any(s["status"] in {"running", "interrupted"} for s in unit["sessions"]):
+                raise HubError("Work has a running or interrupted session; inspect and release it explicitly")
+            if unit["status"] not in {"planned", "prepared", "review"}:
+                raise HubError("This execution cannot be resumed; inspect its lifecycle state")
+        else:
+            key = source.get("key") or reference
+            if reference and re.fullmatch(r"W-[0-9a-f]{12}", reference):
+                raise HubError("No recorded execution matches this ID")
+            if source.get("key") and reference and reference != source["key"]:
+                raise HubError("Reference and source key differ")
+            if key:
+                if not source.get("id") or not source.get("provider"):
+                    raise HubError("First start by key requires the resolved source's --source-provider and --source-id")
+                source["key"] = key
+            if not all(v and v.strip() for v in (title, intent, verification)):
+                raise HubError("First start requires --title, --intent and --verify after resolving the source ticket")
+            if names is None:
+                raise HubError("First start requires --repo or --no-repos for explicitly scoped non-code work")
+            unit = _create(config, title, intent, names, verification, source, resource_names)
+        if unit["status"] == "review":
+            for name in unit["repos"]:
+                available(config.repo(name))
                 validate_tree(config, unit, name)
-                continue
-            # Never reuse an existing branch with ambiguous history.
-            exists = run(["git", "-C", repo["path"], "show-ref", "--verify", "--quiet", "refs/heads/" + entry["branch"]], check=False)
-            if exists.returncode == 0:
-                raise HubError("Task branch already exists without its recorded worktree; inspect manually")
-            run(["git", "-C", repo["path"], "worktree", "add", "-b", entry["branch"], path, entry["base"]])
-        write(root / "AGENTS.md", worker_instructions(config, unit))
-        write(root / "CLAUDE.md", "@AGENTS.md\n")
-        unit["status"] = "prepared"
-        persist(config, unit)
-        return {"id": identifier, "directory": str(root), "status": unit["status"]}
+            if not (location(config, unit["id"]) / "AGENTS.md").is_file():
+                raise HubError("Worker instructions missing; inspect before resuming")
+        else:
+            _prepare(config, unit)
+        prefix = ["hub", "--instance", str(config.root)]
+        identifier = unit["id"]
+        return {"id": identifier, "key": (unit.get("source") or {}).get("key"),
+                "title": unit["title"], "status": unit["status"], "reused": reused,
+                "directory": str(location(config, identifier)), "repos": unit["repos"],
+                "next_commands": [shlex.join(prefix + args) for args in (
+                    ["work", "status", identifier], ["sandbox-check", identifier],
+                    ["agent", "worker", identifier])],
+                "source_access": "not checked; read the canonical ticket before implementation",
+                "worker": "not launched; inspect the plan and verify the sandbox before --launch"}
 
 
 def worker_instructions(config, unit):

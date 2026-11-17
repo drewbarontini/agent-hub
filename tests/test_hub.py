@@ -410,6 +410,153 @@ class HubTests(unittest.TestCase):
         self.assertEqual(work.load(self.config, unit["id"])["repos"]["alpha"]["branch"], branch)
         self.assertEqual(git(work.location(self.config, unit["id"], "alpha"), "branch", "--show-current"), branch)
 
+    def start_cli(self, *args, check=True):
+        return run([sys.executable, CORE / "bin/hub", "--instance", self.instance,
+                    "work", "start", *args], check=check)
+
+    def start_args(self):
+        return ["ENG-42", "--title", "Fix cache", "--intent", "Improve a fixture",
+                "--verify", "Check fixture content", "--repo", "alpha",
+                "--source-provider", "example-tracker", "--source-id", "immutable-page-id"]
+
+    def test_start_cli_creates_and_resumes_multi_repo_work(self):
+        repository(self.root / "beta")
+        self.register((self.instance / "repos.toml").read_text() + '\n[[repos]]\nname="beta"\nremote="https://github.com/example/beta.git"\n')
+        args = self.start_args() + ["--repo", "beta"]
+        first = json.loads(self.start_cli(*args).stdout)
+        self.assertFalse(first["reused"])
+        self.assertEqual(first["status"], "prepared")
+        self.assertEqual(first["key"], "ENG-42")
+        self.assertEqual(len(first["next_commands"]), 3)
+        for name in ("alpha", "beta"):
+            path = work.location(self.config, first["id"], name)
+            self.assertEqual(git(path, "branch", "--show-current"), "ENG-42-fix-cache")
+        for args in (args, ["ENG-42"], [first["id"]]):
+            resumed = json.loads(self.start_cli(*args).stdout)
+            self.assertTrue(resumed["reused"])
+            self.assertEqual(resumed["id"], first["id"])
+        self.assertEqual(len(work.units(self.config)), 1)
+        self.assertEqual(git(self.repo, "branch", "--show-current"), "main")
+
+    def test_start_concurrent_invocations_share_one_execution(self):
+        from concurrent.futures import ThreadPoolExecutor
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            results = list(pool.map(lambda _: json.loads(self.start_cli(*self.start_args()).stdout), range(2)))
+        self.assertEqual(results[0]["id"], results[1]["id"])
+        self.assertEqual(sorted(r["reused"] for r in results), [False, True])
+        self.assertEqual(len(work.units(self.config)), 1)
+
+    def test_start_reuses_immutable_identity_without_renaming_branch(self):
+        first = json.loads(self.start_cli(*self.start_args()).stdout)
+        resumed = work.start(self.config, "NEW-42", source={"provider": "example-tracker",
+                             "id": "immutable-page-id", "key": "NEW-42"})
+        self.assertEqual(resumed["id"], first["id"])
+        self.assertEqual(resumed["key"], "ENG-42")
+        self.assertEqual(resumed["repos"], first["repos"])
+        self.assertEqual(len(work.units(self.config)), 1)
+
+    def test_start_refuses_changed_identity_scope_or_requirements(self):
+        first = json.loads(self.start_cli(*self.start_args()).stdout)
+        record = work.record_path(self.config, first["id"]).read_bytes()
+        for fields in ({"source": {"provider": "example-tracker", "id": "other-page"}},
+                       {"source": {"provider": "other-tracker", "id": "immutable-page-id"}},
+                       {"names": []}, {"resource_names": ["unknown"]},
+                       {"title": "Changed title"}, {"intent": "Changed intent"},
+                       {"verification": "Changed verification"}):
+            with self.subTest(fields=fields), self.assertRaises(HubError):
+                work.start(self.config, "ENG-42", **fields)
+        self.assertEqual(work.record_path(self.config, first["id"]).read_bytes(), record)
+
+    def test_start_first_run_requires_explicit_scope_and_resolved_source(self):
+        for args in (["ENG-42"], ["ENG-42", "--title", "Task", "--intent", "Intent", "--verify", "Check"],
+                     ["--title", "Task", "--intent", "Intent", "--verify", "Check"],
+                     ["W-doesnotexist"], ["../outside"]):
+            with self.subTest(args=args):
+                result = self.start_cli(*args, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertEqual(work.units(self.config), [])
+        result = json.loads(self.start_cli("--title", "Analysis", "--intent", "Reason about a fixture",
+                                          "--verify", "Review the reasoning", "--no-repos").stdout)
+        self.assertEqual(result["repos"], {})
+        self.assertIsNone(result["key"])
+
+    def test_start_refuses_ambiguous_source_and_resolves_legacy_ids(self):
+        first = json.loads(self.start_cli(*self.start_args()).stdout)
+        duplicate = work.create(self.config, "Other execution", "Improve a fixture", [], "Check fixture content",
+                                source={"provider": "example-tracker", "id": "immutable-page-id", "key": "ENG-42"})
+        with self.assertRaises(HubError):
+            work.resolve(self.config, "ENG-42")
+        with self.assertRaises(HubError):
+            work.start(self.config, "ENG-42")
+        with self.assertRaises(HubError):
+            work.start(self.config, source={"provider": "example-tracker", "id": "immutable-page-id"})
+        for unit in (first, duplicate):
+            self.assertEqual(work.resolve(self.config, unit["id"]), unit["id"])
+            self.assertEqual(work.start(self.config, unit["id"])["id"], unit["id"])
+
+    def test_start_blocks_live_interrupted_cleaned_and_wrong_branch_work(self):
+        result = json.loads(self.start_cli(*self.start_args()).stdout)
+        unit = work.load(self.config, result["id"])
+        for status in ("running", "interrupted"):
+            unit["sessions"] = [{"id": "fixture-session", "status": status}]
+            work.persist(self.config, unit)
+            with self.subTest(status=status), self.assertRaises(HubError):
+                work.start(self.config, "ENG-42")
+        unit["sessions"] = []
+        unit["status"] = "cleaned"
+        work.persist(self.config, unit)
+        with self.assertRaises(HubError):
+            work.start(self.config, "ENG-42")
+        unit["status"] = "prepared"
+        work.persist(self.config, unit)
+        git(work.location(self.config, unit["id"], "alpha"), "checkout", "-b", "unexpected")
+        with self.assertRaises(HubError):
+            work.start(self.config, "ENG-42")
+
+    def test_start_resumes_review_without_losing_state_or_changes(self):
+        result = json.loads(self.start_cli(*self.start_args()).stdout)
+        path = work.location(self.config, result["id"], "alpha")
+        write(path / "example.txt", "change under review\n")
+        work.report(self.config, result["id"], "Review this fixture")
+        resumed = work.start(self.config, "ENG-42")
+        self.assertEqual(resumed["status"], "review")
+        self.assertEqual((path / "example.txt").read_text(), "change under review\n")
+        self.assertEqual(work.load(self.config, result["id"])["summary"], "Review this fixture")
+
+    def test_source_keys_work_across_cli_lifecycle_and_agent_plans(self):
+        from agent_hub.cli import dispatch, parser
+        result = json.loads(self.start_cli(*self.start_args()).stdout)
+        prefix = ["--instance", str(self.instance)]
+        for args in (["work", "prepare", "ENG-42"], ["work", "status", "ENG-42"],
+                     ["work", "cleanup", "ENG-42"], ["agent", "worker", "ENG-42"]):
+            output = dispatch(parser().parse_args(prefix + args))
+            self.assertEqual((output[0] if isinstance(output, list) else output)["id"], result["id"])
+        with patch.object(agents, "sandbox_probe", return_value={"passed": True}) as probe:
+            dispatch(parser().parse_args(prefix + ["sandbox-check", "ENG-42"]))
+            self.assertEqual(probe.call_args.args[1], result["id"])
+        output = dispatch(parser().parse_args(prefix + ["work", "report", "ENG-42", "--summary", "Reviewed"]))
+        self.assertEqual(output["status"], "review")
+        output["sessions"] = [{"id": "fixture-session", "status": "interrupted"}]
+        work.persist(self.config, output)
+        released = dispatch(parser().parse_args(prefix + ["work", "release", "ENG-42", "--session",
+                                                         "fixture-session", "--ack-session-ended"]))
+        self.assertEqual(released["id"], result["id"])
+        self.assertEqual(work.start(self.config, "ENG-42")["status"], "review")
+
+    def test_start_retains_recoverable_record_after_partial_preparation(self):
+        original = work.run
+        def fail_add(args, **kwargs):
+            if "worktree" in args and "add" in args:
+                raise HubError("Fixture preparation failure")
+            return original(args, **kwargs)
+        with patch.object(work, "run", side_effect=fail_add), self.assertRaises(HubError):
+            work.start(self.config, "ENG-42", title="Fix cache", intent="Improve a fixture",
+                       names=["alpha"], verification="Check fixture content",
+                       source={"provider": "example-tracker", "id": "immutable-page-id"})
+        unit, = work.units(self.config)
+        self.assertEqual(unit["status"], "planned")
+        self.assertEqual(work.start(self.config, "ENG-42")["id"], unit["id"])
+
     def test_invalid_source_keys_cannot_name_branches(self):
         for key in ("--output=outside", "../outside", "ENG-42/other", "ENG 42"):
             with self.subTest(key=key), self.assertRaises(HubError):
