@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -10,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_hub import agents, context, evolution, repos, security, work
+from agent_hub import agents, context, evolution, prune, repos, security, work
 from agent_hub.cli import service
 from agent_hub.common import CORE, HubError, git, read_json, run, save, toml_string, write
 from agent_hub.config import Config
@@ -663,6 +664,356 @@ class HubTests(unittest.TestCase):
         self.assertFalse(path.exists())
         self.assertTrue(work.record_path(self.config, unit["id"]).exists())
         self.assertTrue(git(self.repo, "show-ref", "refs/heads/" + unit["repos"]["alpha"]["branch"]))
+
+    def cleanup_fixture(self, squash=False):
+        origin = self.root / "origin.git"
+        run(["git", "init", "--bare", origin])
+        # Keep the registered GitHub identity while all Git traffic stays local.
+        git(self.repo, "config", "url." + origin.as_uri() + ".insteadOf", "https://github.com/example/alpha.git")
+        git(self.repo, "push", "origin", "main")
+        git(self.repo, "fetch", "origin")
+        unit = self.unit()
+        path = work.location(self.config, unit["id"], "alpha")
+        write(path / "example.txt", "fixture change\n")
+        commit(path, "task change")
+        head = git(path, "rev-parse", "HEAD")
+        if squash:
+            git(self.repo, "merge", "--squash", unit["repos"]["alpha"]["branch"])
+            commit(self.repo, "squashed task")
+        else:
+            git(self.repo, "merge", "--ff-only", unit["repos"]["alpha"]["branch"])
+        merged = git(self.repo, "rev-parse", "HEAD")
+        git(self.repo, "push", "origin", "main")
+        git(self.repo, "fetch", "origin")
+        unit = work.report(self.config, unit["id"], "Reviewed fixture")
+        pr = {"number": 42, "state": "closed", "merged_at": "2026-01-01T00:00:00Z",
+              "merge_commit_sha": merged,
+              "head": {"ref": unit["repos"]["alpha"]["branch"], "sha": head,
+                       "repo": {"full_name": "example/alpha"}},
+              "base": {"ref": "main", "repo": {"full_name": "example/alpha"}}}
+        return unit, path, pr
+
+    def github_fixture(self, prs, code=0, pages=None):
+        self.config.data.setdefault("tools", {})["gh"] = sys.executable
+        original = prune.run
+        def respond(args, **kwargs):
+            if str(args[0]) == sys.executable and args[1] == "api":
+                self.assertIn("GET", args)
+                self.assertIn("--paginate", args)
+                self.assertIn("--slurp", args)
+                return subprocess.CompletedProcess(args, code, json.dumps([prs] if pages is None else pages), "provider details withheld")
+            return original(args, **kwargs)
+        return patch.object(prune, "run", side_effect=respond)
+
+    def test_prune_preview_is_read_only_and_apply_is_explicit(self):
+        unit, path, _ = self.cleanup_fixture()
+        before = work.record_path(self.config, unit["id"]).read_bytes()
+        refs = git(self.repo, "show-ref")
+        row, = prune.prune(self.config, unit["id"], delete_branches=True)["work"]
+        self.assertEqual(row["state"], "eligible")
+        self.assertTrue(row["repos"][0]["delete_branch"])
+        self.assertTrue(path.exists())
+        self.assertEqual(git(self.repo, "show-ref"), refs)
+        self.assertEqual(work.record_path(self.config, unit["id"]).read_bytes(), before)
+        result = run([sys.executable, CORE / "bin/hub", "--instance", self.instance,
+                      "work", "prune", unit["id"], "--delete-branches", "--apply"])
+        row, = json.loads(result.stdout)["work"]
+        self.assertEqual(row["state"], "cleaned")
+        self.assertEqual(row["removed_worktrees"], ["alpha"])
+        self.assertEqual(row["deleted_branches"], ["alpha"])
+        self.assertFalse(path.exists())
+        self.assertIsNone(prune.branch_head(self.config.repo("alpha"), unit["repos"]["alpha"]["branch"]))
+        self.assertEqual(work.load(self.config, unit["id"])["status"], "cleaned")
+        self.assertTrue(work.location(self.config, unit["id"]).exists())
+
+    def test_prune_preview_does_not_refresh_git_indexes(self):
+        unit, path, _ = self.cleanup_fixture()
+        indexes = {}
+        for checkout in (self.repo, path):
+            git(checkout, "status", "--porcelain")
+            index = Path(git(checkout, "rev-parse", "--path-format=absolute", "--git-path", "index"))
+            indexes[index] = index.read_bytes()
+            tracked = checkout / "example.txt"
+            stat = tracked.stat()
+            os.utime(tracked, ns=(stat.st_atime_ns, stat.st_mtime_ns + 5_000_000_000))
+        row, = prune.prune(self.config, unit["id"], delete_branches=True)["work"]
+        self.assertEqual(row["state"], "eligible")
+        for index, before in indexes.items():
+            self.assertEqual(index.read_bytes(), before, f"Preview refreshed {index}")
+
+    def test_prune_unknown_execution_returns_cli_error_without_changes(self):
+        unit, path, _ = self.cleanup_fixture()
+        before = work.record_path(self.config, unit["id"]).read_bytes()
+        refs = git(self.repo, "show-ref")
+        for reference in ("W-doesnotexist", ""):
+            with self.subTest(reference=reference):
+                result = run([sys.executable, CORE / "bin/hub", "--instance", self.instance,
+                              "work", "prune", reference, "--apply", "--delete-branches"], check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("error", json.loads(result.stdout or result.stderr))
+                self.assertTrue(path.exists())
+                self.assertEqual(git(self.repo, "show-ref"), refs)
+                self.assertEqual(work.record_path(self.config, unit["id"]).read_bytes(), before)
+
+    def test_prune_default_retains_branches_and_later_deletes_eligible_branch(self):
+        unit, path, _ = self.cleanup_fixture()
+        row, = prune.prune(self.config, unit["id"], apply=True)["work"]
+        self.assertEqual(row["deleted_branches"], [])
+        self.assertFalse(path.exists())
+        self.assertIsNotNone(prune.branch_head(self.config.repo("alpha"), unit["repos"]["alpha"]["branch"]))
+        row, = prune.prune(self.config, unit["id"], apply=True, delete_branches=True)["work"]
+        self.assertEqual(row["deleted_branches"], ["alpha"])
+        self.assertEqual(prune.prune(self.config, unit["id"])["work"][0]["state"], "kept")
+
+    def test_prune_recognizes_squash_merge_and_retains_original_branch(self):
+        unit, path, pr = self.cleanup_fixture(squash=True)
+        row, = prune.prune(self.config, unit["id"], apply=True)["work"]
+        self.assertEqual(row["state"], "kept")
+        self.assertTrue(path.exists())
+        with self.github_fixture([pr]):
+            row, = prune.prune(self.config, unit["id"], apply=True, delete_branches=True, github=True)["work"]
+        self.assertEqual(row["state"], "cleaned")
+        self.assertEqual(row["repos"][0]["merge"], "pr-evidence")
+        self.assertEqual(row["deleted_branches"], [])
+        self.assertIn("original commits", row["repos"][0]["branch_reason"])
+        self.assertEqual(prune.branch_head(self.config.repo("alpha"), unit["repos"]["alpha"]["branch"]), pr["head"]["sha"])
+        self.assertFalse(path.exists())
+
+    def test_prune_keeps_extra_local_commits_even_when_pr_merged(self):
+        unit, path, pr = self.cleanup_fixture()
+        write(path / "extra.txt", "additional local work")
+        commit(path)
+        with self.github_fixture([pr]):
+            row, = prune.prune(self.config, unit["id"], apply=True, delete_branches=True, github=True)["work"]
+        self.assertEqual(row["state"], "kept")
+        self.assertIn("final head", row["reasons"][0])
+        self.assertTrue(path.exists())
+        self.assertIsNotNone(prune.branch_head(self.config.repo("alpha"), unit["repos"]["alpha"]["branch"]))
+
+    def test_prune_refuses_open_closed_unmerged_and_wrong_base_prs(self):
+        unit, path, pr = self.cleanup_fixture()
+        for changes in ({"state": "open", "merged_at": None}, {"merged_at": None},
+                        {"base": {"ref": "release", "repo": {"full_name": "example/alpha"}}},
+                        {"head": dict(pr["head"], repo={"full_name": "other/alpha"})},
+                        {"merge_commit_sha": None}, {"merge_commit_sha": "0" * 40},
+                        {"head": dict(pr["head"], sha="0" * 40)}):
+            with self.subTest(changes=changes), self.github_fixture([dict(pr, **changes)]):
+                row, = prune.prune(self.config, unit["id"], apply=True, github=True)["work"]
+                self.assertEqual(row["state"], "kept")
+                self.assertTrue(path.exists())
+        with self.github_fixture([pr, dict(pr, number=43, merged_at=None)]):
+            self.assertEqual(prune.prune(self.config, unit["id"], github=True)["work"][0]["state"], "kept")
+        with self.github_fixture([], pages=[[pr], [dict(pr, number=43, state="open", merged_at=None)]]):
+            self.assertEqual(prune.prune(self.config, unit["id"], github=True)["work"][0]["state"], "kept")
+
+    def test_prune_keeps_work_when_provider_is_missing_unavailable_or_malformed(self):
+        unit, path, pr = self.cleanup_fixture()
+        with patch.object(prune, "executable", return_value=None):
+            row, = prune.prune(self.config, unit["id"], apply=True, github=True)["work"]
+            self.assertIn("unavailable", row["reasons"][0])
+        for response, code in (([pr], 1), ([], 0), ({"unexpected": "object"}, 0)):
+            with self.subTest(response=response, code=code), self.github_fixture(response, code):
+                row, = prune.prune(self.config, unit["id"], apply=True, github=True)["work"]
+                self.assertEqual(row["state"], "kept")
+                self.assertNotIn("provider details", str(row))
+                self.assertTrue(path.exists())
+
+    def test_prune_preview_does_not_lazy_fetch_from_a_promisor_remote(self):
+        unit, path, pr = self.cleanup_fixture()
+        origin = self.root / "origin.git"
+        identity = ["-c", "user.name=Hub Test", "-c", "user.email=hub@example.invalid"]
+        remote_head = git(origin, *identity, "commit-tree", git(origin, "rev-parse", "main^{tree}"),
+                          "-p", pr["head"]["sha"], "-m", "remote-only PR head")
+        git(origin, "update-ref", "refs/heads/remote-pr", remote_head)
+        git(origin, "config", "uploadpack.allowFilter", "true")
+        self.assertNotEqual(run(["git", "-C", self.repo, "cat-file", "-e", remote_head], check=False).returncode, 0)
+        git(self.repo, "config", "remote.origin.promisor", "true")
+        git(self.repo, "config", "remote.origin.partialclonefilter", "blob:none")
+        objects = self.repo / ".git/objects"
+        before = {p.relative_to(objects): hashlib.sha256(p.read_bytes()).hexdigest()
+                  for p in objects.rglob("*") if p.is_file()}
+        for promisor in ("true", "false"):
+            git(self.repo, "config", "remote.origin.promisor", promisor)
+            with self.subTest(promisor=promisor), self.github_fixture([dict(pr, head=dict(pr["head"], sha=remote_head))]):
+                row, = prune.prune(self.config, unit["id"], github=True)["work"]
+                after = {p.relative_to(objects): hashlib.sha256(p.read_bytes()).hexdigest()
+                         for p in objects.rglob("*") if p.is_file()}
+                self.assertEqual(after, before, "Preview fetched missing objects")
+                self.assertEqual(row["state"], "kept")
+                self.assertIn("Partial clone", row["reasons"][0])
+        self.assertTrue(path.exists())
+
+    def test_prune_refuses_dirty_untracked_ignored_files_and_unreleased_sessions(self):
+        unit, path, _ = self.cleanup_fixture()
+        for state in ("running", "interrupted"):
+            unit["sessions"] = [{"id": "fixture", "status": state}]
+            work.persist(self.config, unit)
+            self.assertEqual(prune.prune(self.config, unit["id"], apply=True)["work"][0]["state"], "kept")
+        unit["sessions"] = []
+        work.persist(self.config, unit)
+        for file, original in (("example.txt", "fixture change\n"), ("untracked.txt", None)):
+            write(path / file, "valuable changes")
+            row, = prune.prune(self.config, unit["id"], apply=True)["work"]
+            self.assertIn("changed, untracked or ignored", row["reasons"][0])
+            if original is None:
+                (path / file).unlink()
+            else:
+                write(path / file, original)
+        ignored = self.root / "ignore-rules"
+        write(ignored, "ignored/\n")
+        git(self.repo, "config", "core.excludesFile", str(ignored))
+        write(path / "ignored/cache", "valuable ignored work")
+        row, = prune.prune(self.config, unit["id"], apply=True)["work"]
+        self.assertEqual(row["state"], "kept")
+        self.assertTrue((path / "ignored/cache").exists())
+
+    def test_prune_refuses_stale_or_missing_refs_and_unreachable_live_remote(self):
+        unit, path, pr = self.cleanup_fixture()
+        write(self.repo / "later.txt", "later default work")
+        commit(self.repo)
+        git(self.repo, "push", "origin", "main")
+        git(self.repo, "update-ref", "refs/remotes/origin/main", pr["merge_commit_sha"])
+        row, = prune.prune(self.config, unit["id"], apply=True)["work"]
+        self.assertIn("stale", row["reasons"][0])
+        git(self.repo, "update-ref", "-d", "refs/remotes/origin/main")
+        self.assertEqual(prune.prune(self.config, unit["id"], apply=True)["work"][0]["state"], "kept")
+        (self.root / "origin.git").rename(self.root / "offline-origin.git")
+        row, = prune.prune(self.config, unit["id"], apply=True)["work"]
+        self.assertIn("live origin", row["reasons"][0])
+        self.assertTrue(path.exists())
+
+    def test_prune_does_not_infer_completion_or_touch_foreign_worktrees(self):
+        unit, path, _ = self.cleanup_fixture()
+        for state in ("planned", "prepared"):
+            unit["status"] = state
+            work.persist(self.config, unit)
+            self.assertEqual(prune.prune(self.config, unit["id"], apply=True)["work"][0]["state"], "kept")
+        unit["status"] = "review"
+        work.persist(self.config, unit)
+        moved = self.root / "foreign-worktree"
+        git(self.repo, "worktree", "move", str(path), str(moved))
+        row, = prune.prune(self.config, unit["id"], apply=True, delete_branches=True)["work"]
+        self.assertIn("outside its recorded worktree", row["reasons"][0])
+        self.assertTrue(moved.exists())
+
+    def test_prune_requires_commits_in_both_local_and_live_default(self):
+        unit, path, pr = self.cleanup_fixture()
+        git(self.repo, "update-ref", "refs/heads/main", unit["repos"]["alpha"]["base"])
+        self.assertEqual(prune.prune(self.config, unit["id"], apply=True)["work"][0]["state"], "kept")
+        git(self.repo, "update-ref", "refs/heads/main", pr["merge_commit_sha"])
+        git(self.root / "origin.git", "update-ref", "refs/heads/main", unit["repos"]["alpha"]["base"])
+        git(self.repo, "update-ref", "refs/remotes/origin/main", unit["repos"]["alpha"]["base"])
+        row, = prune.prune(self.config, unit["id"], apply=True, delete_branches=True)["work"]
+        self.assertEqual(row["state"], "kept")
+        self.assertIn("local and live default", row["reasons"][0])
+        self.assertTrue(path.exists())
+
+    def test_prune_uses_original_history_instead_of_local_replacements(self):
+        unit, path, pr = self.cleanup_fixture()
+        write(path / "extra.txt", "unmerged local work")
+        commit(path)
+        identity = ["-c", "user.name=Hub Test", "-c", "user.email=hub@example.invalid"]
+        # Simulate local history editing that makes default appear to contain
+        # an otherwise unmerged commit, without altering the remote's objects.
+        extra = git(self.repo, *identity, "commit-tree", git(path, "rev-parse", "HEAD^{tree}"),
+                    "-p", unit["repos"]["alpha"]["base"], "-m", "unmerged alternate history")
+        git(self.repo, "update-ref", "refs/heads/" + unit["repos"]["alpha"]["branch"], extra)
+        replacement = git(self.repo, *identity, "commit-tree", git(self.repo, "rev-parse", "main^{tree}"),
+                          "-p", extra, "-m", "local replacement history")
+        git(self.repo, "replace", pr["merge_commit_sha"], replacement)
+        row, = prune.prune(self.config, unit["id"], delete_branches=True)["work"]
+        self.assertEqual(row["state"], "kept")
+        self.assertTrue(path.exists())
+
+    def test_prune_refuses_locked_and_wrong_branch_worktrees(self):
+        unit, path, _ = self.cleanup_fixture()
+        git(self.repo, "worktree", "lock", str(path))
+        row, = prune.prune(self.config, unit["id"], apply=True)["work"]
+        self.assertIn("locked", row["reasons"][0])
+        git(self.repo, "worktree", "unlock", str(path))
+        git(path, "checkout", "-b", "unexpected")
+        row, = prune.prune(self.config, unit["id"], apply=True)["work"]
+        self.assertIn("branch changed", row["reasons"][0])
+        self.assertTrue(path.exists())
+
+    def test_prune_checks_all_execution_repositories_before_removing_any(self):
+        unit, path, _ = self.cleanup_fixture()
+        beta = repository(self.root / "beta")
+        self.register((self.instance / "repos.toml").read_text() + '\n[[repos]]\nname="beta"\nremote="https://github.com/example/beta.git"\n')
+        unit["repos"]["beta"] = {"branch": work.branch_name(unit, "beta"), "base": git(beta, "rev-parse", "HEAD")}
+        unit["status"] = "planned"
+        work.persist(self.config, unit)
+        work.prepare(self.config, unit["id"])
+        write(work.location(self.config, unit["id"], "beta") / "new.txt", "unreviewed work")
+        work.report(self.config, unit["id"], "Review both fixtures")
+        row, = prune.prune(self.config, unit["id"], apply=True, delete_branches=True)["work"]
+        self.assertEqual(row["state"], "kept")
+        self.assertTrue(path.exists())
+        self.assertTrue(work.location(self.config, unit["id"], "beta").exists())
+
+    def test_prune_aggregate_preserves_unready_work(self):
+        unit, path, _ = self.cleanup_fixture()
+        unready = self.unit()
+        result = prune.prune(self.config, apply=True)
+        states = {row["id"]: row["state"] for row in result["work"]}
+        self.assertEqual(states, {unit["id"]: "cleaned", unready["id"]: "kept"})
+        self.assertFalse(path.exists())
+        self.assertTrue(work.location(self.config, unready["id"], "alpha").exists())
+
+    def test_prune_reports_invalid_records_without_losing_other_results(self):
+        unit, path, _ = self.cleanup_fixture()
+        broken = work.create(self.config, "Broken fixture", "Test corrupt metadata", [], "Report it honestly")
+        del broken["sessions"]
+        work.persist(self.config, broken)
+        result = prune.prune(self.config, apply=True)
+        states = {row["id"]: row["state"] for row in result["work"]}
+        self.assertEqual(states, {unit["id"]: "cleaned", broken["id"]: "kept"})
+        self.assertFalse(path.exists())
+        row = next(r for r in result["work"] if r["id"] == broken["id"])
+        self.assertEqual(row["reasons"], ["Invalid execution metadata; inspect it manually"])
+
+    def test_prune_rechecks_evidence_before_removal(self):
+        unit, path, _ = self.cleanup_fixture()
+        original = prune.unit_plan
+        calls = 0
+        def change_before_recheck(*args, **kwargs):
+            nonlocal calls
+            calls += 1
+            if calls == 2:
+                write(path / "new-work.txt", "work arriving after assessment")
+            return original(*args, **kwargs)
+        with patch.object(prune, "unit_plan", side_effect=change_before_recheck):
+            row, = prune.prune(self.config, unit["id"], apply=True, delete_branches=True)["work"]
+        self.assertEqual(row["state"], "kept")
+        self.assertIn("changed during assessment", row["reasons"][0])
+        self.assertTrue((path / "new-work.txt").exists())
+
+    def test_prune_reports_removal_failure_and_retains_branch(self):
+        unit, path, _ = self.cleanup_fixture()
+        original = prune.run
+        def refuse_removal(args, **kwargs):
+            if "worktree" in args and "remove" in args:
+                raise HubError("Fixture Git removal refusal")
+            return original(args, **kwargs)
+        with patch.object(prune, "run", side_effect=refuse_removal):
+            result = prune.prune(self.config, unit["id"], apply=True, delete_branches=True)
+        self.assertEqual(result["exit_code"], 1)
+        self.assertEqual(result["work"][0]["state"], "failed")
+        self.assertEqual(result["work"][0]["deleted_branches"], [])
+        self.assertEqual(work.load(self.config, unit["id"])["status"], "review")
+        self.assertTrue(path.exists())
+
+    def test_prune_reports_actual_removal_if_metadata_write_fails(self):
+        unit, path, _ = self.cleanup_fixture()
+        with patch.object(work, "persist", side_effect=OSError("fixture disk failure")):
+            result = prune.prune(self.config, unit["id"], apply=True)
+        self.assertEqual(result["exit_code"], 1)
+        row, = result["work"]
+        self.assertEqual(row["state"], "failed")
+        self.assertEqual(row["removed_worktrees"], ["alpha"])
+        self.assertFalse(path.exists())
+        self.assertEqual(work.load(self.config, unit["id"])["status"], "review")
+        self.assertEqual(prune.prune(self.config, unit["id"], apply=True, delete_branches=True)["work"][0]["state"], "cleaned")
 
     def test_cleanup_refuses_dirty(self):
         unit = self.unit()

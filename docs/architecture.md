@@ -62,6 +62,7 @@ its overlay is independently owned and optional.
 | `config.py` | TOML layers, registry validation, local path resolution |
 | `repos.py` | Identity checks, discovery, bootstrap, workspace, diagnostics, guards |
 | `work.py` | Local execution recovery, worktree preparation, inspection and cleanup |
+| `prune.py` | Explicit merged-work assessment, live origin proof and optional GitHub PR evidence |
 | `agents.py` | Small Codex launch adapter and filesystem sandbox probe |
 | `evolution.py` | Initialization, pinned adoption, rollback, reconciliation, promotion |
 | `security.py` | Heuristic credential and private-file scanning |
@@ -85,7 +86,8 @@ flowchart TD
 Each work record has a UUID-based identity, intent, verification criteria, optional
 source identity, scoped resource names, repository branch/base references, session
 leases and brief operator evidence. It records local execution context without mirroring an
-external provider's project state. No remote provider adapter is implemented yet.
+external provider's project state. Canonical work-provider lookup and synchronization
+are not implemented; optional GitHub PR evidence is limited to explicit cleanup.
 
 Work metadata lives in `work/<id>/`. Generated execution directories live in
 `.hub/worktrees/<id>/<repo>/`. Records are ignored execution metadata, not mirrored

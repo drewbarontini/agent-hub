@@ -26,7 +26,7 @@ def inspect(repo):
         git(path, "rev-parse", "--verify", "refs/heads/" + repo["default_branch"])
         row.update(available=True,
                    branch=git(path, "symbolic-ref", "--short", "HEAD", check=False) or "(detached)",
-                   dirty=bool(git(path, "status", "--porcelain=v1", "--untracked-files=all")))
+                   dirty=bool(git(path, "--no-optional-locks", "status", "--porcelain=v1", "--untracked-files=all")))
     except HubError as exc:
         row["problem"] = str(exc)
     return row

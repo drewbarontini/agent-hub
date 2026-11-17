@@ -10,7 +10,7 @@ from pathlib import Path
 from . import __version__
 from .common import CORE, HubError, git, redact, run, save, sanitize
 from .config import Config
-from . import agents, context, evolution, repos, security, work
+from . import agents, context, evolution, prune, repos, security, work
 
 
 def parser():
@@ -68,6 +68,11 @@ def parser():
         if name == "release":
             r.add_argument("--session", required=True)
             r.add_argument("--ack-session-ended", action="store_true", required=True)
+    r = sub.add_parser("prune", help="Assess recorded work for safe cleanup; dry run by default")
+    r.add_argument("id", nargs="?", help="Optional execution ID; default assesses all records")
+    r.add_argument("--apply", action="store_true", help="Remove eligible worktrees after fresh checks")
+    r.add_argument("--delete-branches", action="store_true", help="Also delete branches proven merged locally and on live origin")
+    r.add_argument("--github", action="store_true", help="Require GitHub PR evidence through gh, including squash merges")
     q = commands.add_parser("agent")
     q.add_argument("role", choices=["orchestrator", "worker"])
     q.add_argument("id", nargs="?")
@@ -156,6 +161,9 @@ def dispatch(args):
         return context.inventory(config, args.repo)
     if command == "guard-install":
         return repos.install_guard(config, args.repo)
+    if command == "work" and args.action == "prune":
+        return prune.prune(config, args.id, apply=args.apply,
+                           delete_branches=args.delete_branches, github=args.github)
     if command == "work":
         if args.action in {"create", "start"}:
             source = {field: getattr(args, "source_" + field) for field in ("provider", "id", "key", "url")
