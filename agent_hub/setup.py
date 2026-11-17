@@ -96,7 +96,8 @@ def environment_paths(config, identifier, name, variables):
     from .work import location
     paths = {}
     for variable in variables:
-        path = local_path(location(config, identifier), f"setup/{name}/environment/{variable}")
+        # Repository names cannot start with a dot, so metadata cannot alias a worktree.
+        path = local_path(location(config, identifier), f".setup/{name}/environment/{variable}")
         if path.is_symlink() or (path.exists() and not path.is_dir()):
             raise HubError("Setup environment directory is unsafe")
         paths[variable] = path

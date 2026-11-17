@@ -74,8 +74,9 @@ Use repository ignore rules for local settings and dependency outputs.
 
 `environment_dirs` names tool directory variables, such as `UV_CACHE_DIR`,
 `PIP_CACHE_DIR` or `NPM_CONFIG_CACHE`. Setup creates a separate directory for each
-variable and repository under `.hub/worktrees/<id>/setup/<repo>/environment/`,
+variable and repository under `.hub/worktrees/<id>/.setup/<repo>/environment/`,
 outside repository worktrees, and passes those paths only to setup subprocesses.
+The `.setup` namespace cannot be a repository name.
 The parent environment is unchanged; PATH, HOME and Hub/runtime routing variables
 cannot be used as directory variables. Configure virtual environment creation and
 its executables explicitly in command arrays when needed. These directories

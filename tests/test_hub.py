@@ -146,6 +146,33 @@ class HubTests(unittest.TestCase):
         self.assertIn("preview hub work setup", view)
         self.assertNotIn("setup", work.status(self.config, unit["id"])[0]["repos"]["alpha"])
 
+    def test_setup_cache_namespace_cannot_write_into_an_unselected_setup_repository(self):
+        self.setup_config([[sys.executable, "-c", "import os; from pathlib import Path; "
+                           "p=Path(os.environ['TOOL_CACHE']); (p/'cache-marker').write_text('synthetic cache'); "
+                           "Path('cache-location').write_text(str(p))"]], environment_dirs=["TOOL_CACHE"])
+        repository(self.root / "setup")
+        registry = (self.instance / "repos.toml").read_text()
+        self.register(registry + '\n[[repos]]\nname="setup"\nremote="https://github.com/example/setup.git"\n')
+        unit = self.unit(["alpha", "setup"])
+        unselected = work.location(self.config, unit["id"], "setup")
+        before = git(unselected, "--no-optional-locks", "status", "--porcelain", "--untracked-files=all", "--ignored=matching")
+        index = Path(git(unselected, "rev-parse", "--path-format=absolute", "--git-path", "index"))
+        index_before = index.read_bytes()
+        paths_before = sorted(p.relative_to(unselected).as_posix() for p in unselected.rglob("*"))
+        result = setup.execute(self.config, unit["id"], ["alpha"], apply=True)
+        self.assertTrue(result["ready"])
+        selected = work.location(self.config, unit["id"], "alpha")
+        cache = Path((selected / "cache-location").read_text())
+        self.assertEqual((cache / "cache-marker").read_text(), "synthetic cache")
+        for name in unit["repos"]:
+            self.assertFalse(cache.is_relative_to(work.location(self.config, unit["id"], name)))
+        self.assertEqual(before, git(unselected, "--no-optional-locks", "status", "--porcelain", "--untracked-files=all", "--ignored=matching"))
+        self.assertEqual(index_before, index.read_bytes())
+        self.assertEqual(paths_before, sorted(p.relative_to(unselected).as_posix() for p in unselected.rglob("*")))
+        self.assertEqual(set(work.load(self.config, unit["id"])["setup"]), {"alpha"})
+        with self.assertRaises(HubError):
+            self.register(registry + '\n[[repos]]\nname=".setup"\nremote="https://github.com/example/hidden.git"\n')
+
     def test_setup_rejects_invalid_declarations(self):
         for value in ("command", {"commands": "run"}, {"commands": [[]]}, {"commands": [[1]]},
                       {"commands": [["run\0"]]}, {"unknown": True}, {"timeout": 0}, {"timeout": True},
@@ -315,7 +342,7 @@ class HubTests(unittest.TestCase):
         work.persist(self.config, unit)
         outside = self.root / "outside-cache"
         outside.mkdir()
-        (work.location(self.config, unit["id"]) / "setup").symlink_to(outside, target_is_directory=True)
+        (work.location(self.config, unit["id"]) / ".setup").symlink_to(outside, target_is_directory=True)
         with self.assertRaises(HubError):
             setup.execute(self.config, unit["id"], apply=True)
         self.assertEqual(list(outside.iterdir()), [])
