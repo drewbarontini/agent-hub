@@ -29,6 +29,11 @@ def next_action(row):
         return f"hub work start {identifier}"
     if any(not r["present"] for r in repos):
         return "Inspect missing worktrees before resuming or cleaning up."
+    if any(r.get("setup", {}).get("state") in {"running", "interrupted"} for r in repos):
+        return "Verify prior setup processes have ended and inspect the receipt before retrying."
+    if state == "prepared" and any(r.get("setup", {}).get("state") in {
+            "not-run", "failed", "configuration-changed", "invalid-receipt"} for r in repos):
+        return f"Inspect setup state; preview hub work setup {identifier}."
     if state == "review":
         return f"Review outcome and verification; after merge, preview hub work prune {identifier}."
     if state == "prepared":
@@ -77,6 +82,10 @@ def status(result):
                 state = "changed" if repo["dirty"] else "clean"
             commits = f" | {repo['commits_since_base']} commits since base" if "commits_since_base" in repo else ""
             lines.append(f"  {text(name)}: {text(repo['branch'])} | {text(state)}{text(commits)}")
+            if "setup" in repo:
+                setup_state = text(repo["setup"]["state"])
+                qualifier = " (last run; application checks not run)" if repo["setup"].get("ready") is True else " (readiness unverified)"
+                lines.append(f"    Setup: {setup_state}{qualifier}")
             files = repo.get("changed_files", [])
             for item in files[:8]:
                 path = json.dumps(item["path"], ensure_ascii=True)

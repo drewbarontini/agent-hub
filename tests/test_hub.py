@@ -11,7 +11,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from agent_hub import agents, context, evolution, human, prune, repos, security, work
+from agent_hub import agents, context, evolution, human, prune, repos, security, setup, work
 from agent_hub.cli import service
 from agent_hub.common import CORE, HubError, git, read_json, run, save, toml_string, write
 from agent_hub.config import Config
@@ -72,6 +72,273 @@ class HubTests(unittest.TestCase):
         unit = work.create(self.config, "Bounded task", "Improve a fixture", names if names is not None else ["alpha"], "Check fixture content")
         work.prepare(self.config, unit["id"])
         return unit
+
+    def setup_config(self, commands=None, links=None, environment_dirs=None, timeout=300):
+        path = self.instance / "local.toml"
+        text = path.read_text().split("\n[repos.alpha.setup]")[0]
+        text += "\n[repos.alpha.setup]\ncommands = " + json.dumps(commands or []) + "\n"
+        text += "links = [" + ",".join("{source=" + toml_string(s) + ",target=" + toml_string(t) + "}" for s, t in links or []) + "]\n"
+        text += "environment_dirs = " + json.dumps(environment_dirs or []) + "\n"
+        text += "timeout = " + str(timeout) + "\n"
+        write(path, text)
+        self.config = Config(self.instance)
+
+    def test_setup_preview_skip_and_unconfigured_do_not_run_commands(self):
+        unit = self.unit()
+        self.assertIsNone(setup.execute(self.config, unit["id"], apply=True)["ready"])
+        self.assertEqual(work.load(self.config, unit["id"])["setup"]["alpha"]["state"], "unconfigured")
+        self.setup_config([[sys.executable, "-c", "from pathlib import Path; Path('ran').touch()"]],
+                          [("missing-fixture", ".local-settings")])
+        unit = self.unit()
+        tree = work.location(self.config, unit["id"], "alpha")
+        # Skip does not require a missing local source to be discovered or opened.
+        skipped = setup.execute(self.config, unit["id"], skip=True)
+        self.assertEqual(skipped["repos"][0]["state"], "skipped")
+        self.assertIsNone(skipped["ready"])
+        self.assertFalse((tree / "ran").exists())
+        (self.repo / "missing-fixture").write_text("synthetic settings")
+        record = work.record_path(self.config, unit["id"])
+        before = record.read_bytes()
+        preview = setup.execute(self.config, unit["id"])
+        self.assertFalse(preview["applied"])
+        self.assertEqual(before, record.read_bytes())
+        self.assertFalse((tree / ".local-settings").exists())
+        self.assertFalse((tree / "ran").exists())
+        work.start(self.config, unit["id"])
+        self.assertFalse((tree / "ran").exists())
+
+    def test_setup_repeats_links_and_isolates_tool_directories_per_execution(self):
+        source = self.repo / "fixture-settings"
+        source.write_text("synthetic settings")
+        command = [sys.executable, "-c", "import os,json; from pathlib import Path; "
+                   "p=Path('runs'); p.write_text(str(int(p.read_text())+1) if p.exists() else '1'); "
+                   "Path('environment.json').write_text(json.dumps({'cwd':str(Path.cwd()),'cache':os.environ['TOOL_CACHE']}))"]
+        self.setup_config([command], [("fixture-settings", ".settings/local")], ["TOOL_CACHE"])
+        unit = self.unit()
+        tree = work.location(self.config, unit["id"], "alpha")
+        unmanaged = self.root / "unmanaged-cache"
+        with patch.dict(os.environ, {"TOOL_CACHE": str(unmanaged)}):
+            self.assertTrue(setup.execute(self.config, unit["id"], apply=True)["ready"])
+            inode = (tree / ".settings/local").lstat().st_ino
+            self.assertTrue(setup.execute(self.config, unit["id"], apply=True)["ready"])
+            self.assertEqual(os.environ["TOOL_CACHE"], str(unmanaged))
+        self.assertEqual((tree / "runs").read_text(), "2")
+        self.assertEqual(inode, (tree / ".settings/local").lstat().st_ino)
+        self.assertEqual((tree / ".settings/local").resolve(), source.resolve())
+        environment = json.loads((tree / "environment.json").read_text())
+        cache = Path(environment["cache"])
+        self.assertTrue(cache.is_dir())
+        self.assertTrue(cache.is_relative_to(work.location(self.config, unit["id"])))
+        self.assertFalse(cache.is_relative_to(tree))
+        self.assertEqual(environment["cwd"], str(tree.resolve()))
+        self.assertFalse(unmanaged.exists())
+        receipt = work.load(self.config, unit["id"])["setup"]["alpha"]
+        self.assertEqual(len(receipt["links"]), 1)
+        self.assertEqual(receipt["commands"][0]["exit_code"], 0)
+        second = self.unit()
+        setup.execute(self.config, second["id"], apply=True)
+        second_cache = json.loads((work.location(self.config, second["id"], "alpha") / "environment.json").read_text())["cache"]
+        self.assertNotEqual(str(cache), second_cache)
+        self.setup_config([command], [("fixture-settings", ".settings/local")], ["TOOL_CACHE"], timeout=301)
+        self.assertEqual(setup.observation(self.config, work.load(self.config, unit["id"]), "alpha")["state"], "configuration-changed")
+        view = human.status(work.status(self.config, unit["id"], details=True))
+        self.assertIn("Setup: configuration-changed", view)
+        self.assertIn("preview hub work setup", view)
+        self.assertNotIn("setup", work.status(self.config, unit["id"])[0]["repos"]["alpha"])
+
+    def test_setup_rejects_invalid_declarations(self):
+        for value in ("command", {"commands": "run"}, {"commands": [[]]}, {"commands": [[1]]},
+                      {"commands": [["run\0"]]}, {"unknown": True}, {"timeout": 0}, {"timeout": True},
+                      {"environment_dirs": ["HOME"]}, {"environment_dirs": ["PATH"]},
+                      {"environment_dirs": ["CACHE", "cache"]}, {"environment_dirs": ["invalid-name"]}):
+            with self.subTest(value=value), self.assertRaises(HubError):
+                setup.configuration(value)
+        for path in ("../outside", "/outside", "a/../../x", "", ".", ".git/config", ".GIT/config",
+                     ".codex/config.toml", "nested/.agents/file", "AGENTS.md"):
+            for field in ("source", "target"):
+                with self.subTest(path=path, field=field), self.assertRaises(HubError):
+                    setup.configuration({"links": [{"source": "fixture", "target": "local", field: path}]})
+        with self.assertRaises(HubError):
+            setup.configuration({"links": [{"source": "a", "target": "x"}, {"source": "b", "target": "x/y"}]})
+
+    def test_setup_refuses_missing_symlinked_tracked_and_unmanaged_paths(self):
+        outside = self.root / "outside-settings"
+        outside.mkdir()
+        (outside / "fixture").write_text("preserve outside")
+        for scenario in ("missing", "source-symlink", "source-parent", "target-parent", "tracked", "deleted-tracked", "existing", "unmanaged-link"):
+            with self.subTest(scenario=scenario):
+                source_name, target_name = "fixture-" + scenario, ".settings/local"
+                source = self.repo / source_name
+                if scenario != "missing":
+                    source.write_text("synthetic settings")
+                if scenario == "source-symlink":
+                    source.unlink()
+                    source.symlink_to(outside / "fixture")
+                if scenario == "source-parent":
+                    parent = self.repo / "linked-source"
+                    parent.symlink_to(outside, target_is_directory=True)
+                    source_name = "linked-source/fixture"
+                if scenario in {"tracked", "deleted-tracked"}:
+                    target_name = "example.txt"
+                self.setup_config([[sys.executable, "-c", "from pathlib import Path; Path('ran').touch()"]], [(source_name, target_name)])
+                unit = self.unit()
+                tree = work.location(self.config, unit["id"], "alpha")
+                if scenario == "target-parent":
+                    (tree / ".settings").symlink_to(outside, target_is_directory=True)
+                if scenario == "deleted-tracked":
+                    (tree / "example.txt").unlink()
+                if scenario in {"existing", "unmanaged-link"}:
+                    (tree / ".settings").mkdir()
+                    target = tree / target_name
+                    if scenario == "existing":
+                        target.write_text("unmanaged")
+                    else:
+                        target.symlink_to(os.path.relpath(source, target.parent))
+                before = work.record_path(self.config, unit["id"]).read_bytes()
+                with self.assertRaises(HubError):
+                    setup.execute(self.config, unit["id"], apply=True)
+                self.assertEqual(before, work.record_path(self.config, unit["id"]).read_bytes())
+                self.assertFalse((tree / "ran").exists())
+                self.assertEqual((outside / "fixture").read_text(), "preserve outside")
+
+    def test_setup_failed_commands_preserve_partial_artifacts_and_stop(self):
+        (self.repo / "fixture-settings").write_text("synthetic settings")
+        self.setup_config([[sys.executable, "-c", "from pathlib import Path; Path('partial').write_text('keep'); raise SystemExit(9)"],
+                           [sys.executable, "-c", "from pathlib import Path; Path('should-not-run').touch()"]],
+                          [("fixture-settings", ".local-settings")])
+        unit = self.unit()
+        tree = work.location(self.config, unit["id"], "alpha")
+        result = setup.execute(self.config, unit["id"], apply=True)
+        self.assertFalse(result["ready"])
+        receipt = work.load(self.config, unit["id"])["setup"]["alpha"]
+        self.assertEqual(receipt["state"], "failed")
+        self.assertEqual(receipt["commands"][0]["exit_code"], 9)
+        self.assertEqual(len(receipt["commands"]), 1)
+        self.assertEqual(len(receipt["links"]), 1)
+        self.assertEqual((tree / "partial").read_text(), "keep")
+        self.assertFalse((tree / "should-not-run").exists())
+        self.assertTrue((tree / ".local-settings").is_symlink())
+
+    def test_setup_timeout_and_interrupt_are_recorded_without_output(self):
+        self.setup_config([[sys.executable, "-c", "import time; time.sleep(5)"]], timeout=1)
+        unit = self.unit()
+        result = setup.execute(self.config, unit["id"], apply=True)
+        self.assertFalse(result["ready"])
+        self.assertEqual(result["repos"][0]["commands"][0]["state"], "failed")
+        self.assertIsNone(result["repos"][0]["commands"][0]["exit_code"])
+        with patch("agent_hub.setup.run", side_effect=KeyboardInterrupt), self.assertRaises(KeyboardInterrupt):
+            setup.execute(self.config, unit["id"], apply=True)
+        receipt = work.load(self.config, unit["id"])["setup"]["alpha"]
+        self.assertEqual(receipt["state"], "interrupted")
+        self.assertEqual(receipt["commands"][0]["state"], "interrupted")
+        self.setup_config([[sys.executable, "-c", "import os; os.write(1,bytes([255])); os.write(2,bytes([112,114,105,118,97,116,101,32,111,117,116,112,117,116]))"]])
+        result = setup.execute(self.config, unit["id"], apply=True)
+        self.assertTrue(result["ready"])
+        self.assertNotIn("private output", json.dumps(result))
+
+    def test_setup_does_not_claim_ready_when_a_command_removes_its_link(self):
+        (self.repo / "fixture-settings").write_text("synthetic settings")
+        self.setup_config([[sys.executable, "-c", "from pathlib import Path; Path('.local-settings').unlink()"]],
+                          [("fixture-settings", ".local-settings")])
+        unit = self.unit()
+        result = setup.execute(self.config, unit["id"], apply=True)
+        self.assertFalse(result["ready"])
+        self.assertIn("missing after commands", result["repos"][0]["problem"])
+        self.assertEqual(result["repos"][0]["commands"][0]["exit_code"], 0)
+        self.assertEqual((self.repo / "fixture-settings").read_text(), "synthetic settings")
+
+    def test_setup_local_overrides_preserve_shared_defaults(self):
+        text = (self.instance / "repos.toml").read_text()
+        text += '\n[repos.setup]\ncommands=[["shared-tool","install"]]\ntimeout=17\nenvironment_dirs=["SHARED_CACHE"]\n'
+        self.register(text)
+        with (self.instance / "local.toml").open("a") as stream:
+            stream.write('\n[repos.alpha.setup]\ncommands=[]\nenvironment_dirs=["LOCAL_CACHE"]\n')
+        config = Config(self.instance)
+        self.assertEqual(config.repo("alpha")["setup"]["commands"], [])
+        self.assertEqual(config.repo("alpha")["setup"]["environment_dirs"], ["LOCAL_CACHE"])
+        self.assertEqual(config.repo("alpha")["setup"]["timeout"], 17)
+
+    def test_setup_cleanup_preserves_managed_links_and_unmanaged_ignored_files(self):
+        write(self.repo / ".gitignore", ".local-settings\n.deps/\n")
+        commit(self.repo)
+        (self.repo / "fixture-settings").write_text("synthetic settings")
+        self.setup_config([[sys.executable, "-c", "from pathlib import Path; Path('.deps').mkdir(exist_ok=True); Path('.deps/generated').write_text('dependency')"]],
+                          [("fixture-settings", ".local-settings")])
+        unit = self.unit()
+        tree = work.location(self.config, unit["id"], "alpha")
+        setup.execute(self.config, unit["id"], apply=True)
+        (tree / ".deps/personal-note").write_text("unmanaged")
+        work.report(self.config, unit["id"], "Inspect fixture cleanup")
+        for apply in (False, True):
+            with self.assertRaisesRegex(HubError, "setup artifacts are retained"):
+                work.cleanup(self.config, unit["id"], apply=apply)
+            with patch("agent_hub.prune.live_default") as remote:
+                result = prune.prune(self.config, unit["id"], apply=apply)
+                remote.assert_not_called()
+            self.assertEqual(result["work"][0]["state"], "kept")
+            self.assertIn("setup artifacts are retained", result["work"][0]["reasons"][0])
+            self.assertTrue((tree / ".local-settings").is_symlink())
+            self.assertEqual((tree / ".deps/personal-note").read_text(), "unmanaged")
+            self.assertEqual((tree / ".deps/generated").read_text(), "dependency")
+
+    def test_setup_scope_and_all_repository_preflight(self):
+        self.setup_config([[sys.executable, "-c", "from pathlib import Path; Path('ran').touch()"]])
+        repository(self.root / "beta")
+        self.register((self.instance / "repos.toml").read_text() + '\n[[repos]]\nname="beta"\nremote="https://github.com/example/beta.git"\n')
+        with (self.instance / "local.toml").open("a") as stream:
+            stream.write('\n[repos.beta.setup]\nlinks=[{source="missing",target="local"}]\n')
+        self.config = Config(self.instance)
+        unit = self.unit(["alpha", "beta"])
+        before = work.record_path(self.config, unit["id"]).read_bytes()
+        with self.assertRaises(HubError):
+            setup.execute(self.config, unit["id"], apply=True)
+        self.assertEqual(before, work.record_path(self.config, unit["id"]).read_bytes())
+        self.assertFalse((work.location(self.config, unit["id"], "alpha") / "ran").exists())
+        result = setup.execute(self.config, unit["id"], ["alpha"], apply=True)
+        self.assertTrue(result["ready"])
+        self.assertEqual([r["name"] for r in result["repos"]], ["alpha"])
+        self.assertNotIn("beta", work.load(self.config, unit["id"])["setup"])
+        with self.assertRaises(HubError):
+            setup.execute(self.config, unit["id"], ["outside"], apply=True)
+
+    def test_setup_rejects_active_sessions_and_unsafe_environment_directories(self):
+        self.setup_config([[sys.executable, "-c", "pass"]], environment_dirs=["TOOL_CACHE"])
+        unit = self.unit()
+        unit = work.load(self.config, unit["id"])
+        for state in ("running", "interrupted"):
+            unit["sessions"] = [{"id": "fixture-session", "status": state}]
+            work.persist(self.config, unit)
+            for mode in ({}, {"apply": True}, {"skip": True}):
+                with self.assertRaises(HubError):
+                    setup.execute(self.config, unit["id"], **mode)
+        unit["sessions"] = []
+        work.persist(self.config, unit)
+        outside = self.root / "outside-cache"
+        outside.mkdir()
+        (work.location(self.config, unit["id"]) / "setup").symlink_to(outside, target_is_directory=True)
+        with self.assertRaises(HubError):
+            setup.execute(self.config, unit["id"], apply=True)
+        self.assertEqual(list(outside.iterdir()), [])
+
+    def test_setup_cli_reports_failure_and_accepts_human_source_keys(self):
+        self.setup_config([[sys.executable, "-c", "raise SystemExit(7)"]])
+        unit = work.create(self.config, "Setup fixture", "Test setup", ["alpha"], "Inspect results", {"provider": "manual", "key": "APP-23"})
+        work.prepare(self.config, unit["id"])
+        command = [sys.executable, str(CORE / "bin/hub"), "--instance", str(self.instance), "work", "setup", "APP-23"]
+        preview = subprocess.run(command, capture_output=True, text=True)
+        self.assertEqual(preview.returncode, 0, preview.stderr)
+        self.assertFalse(json.loads(preview.stdout)["applied"])
+        failed = subprocess.run(command + ["--apply"], capture_output=True, text=True)
+        self.assertEqual(failed.returncode, 1)
+        self.assertEqual(json.loads(failed.stdout)["repos"][0]["commands"][0]["exit_code"], 7)
+        skipped = subprocess.run(command + ["--skip"], capture_output=True, text=True)
+        self.assertEqual(skipped.returncode, 0, skipped.stderr)
+        self.assertEqual(json.loads(skipped.stdout)["repos"][0]["state"], "skipped")
+        self.setup_config([[sys.executable, "-c", "from pathlib import Path; Path('ready-marker').touch()"]])
+        completed = subprocess.run(command + ["--repo", "alpha", "--apply"], capture_output=True, text=True)
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertTrue(json.loads(completed.stdout)["ready"])
+        self.assertTrue((work.location(self.config, unit["id"], "alpha") / "ready-marker").exists())
 
     def test_independent_histories(self):
         self.assertNotEqual(git(self.instance, "rev-parse", "--git-dir"), "")

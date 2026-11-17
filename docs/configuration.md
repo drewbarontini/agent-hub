@@ -44,6 +44,49 @@ through local overrides. Nested or duplicate managed destinations are rejected.
 Core may be registered like any repository. Its editable checkout is distinct from
 the pinned runtime under `.hub/cores/`.
 
+## Explicit repository setup
+
+Setup is opt-in and never runs during bootstrap, preparation or resume. Add a
+setup table below a repository's `[[repos]]` entry in `repos.toml`:
+
+```toml
+[repos.setup]
+commands = [["npm", "ci", "--ignore-scripts"]]
+links = [{source = ".env.local", target = ".env.local"}]
+environment_dirs = ["NPM_CONFIG_CACHE"]
+timeout = 300
+```
+
+`commands` are sequential argument arrays, executed in the task worktree without
+an implicit shell; the first failure stops that repository's commands. `timeout`
+is per command, from 1 to 3600 seconds, defaulting to 300. Commands are trusted
+operator configuration and run with the operator's permissions and inherited
+environment; setup is not a sandbox. Core does not discover credentials, install
+hooks or start services on its own. Do not put secrets in command arguments.
+
+Each link names a source relative to the registered ordinary checkout and a
+target relative to its task worktree. Core checks paths and filesystem metadata,
+without opening settings contents. Absolute paths, traversal, protected metadata,
+symlink sources/parents, tracked targets and unmanaged destination entries are
+refused. Only unchanged links recorded as created by this execution are reused;
+an existing matching link is not silently adopted. Target parents may be created.
+Use repository ignore rules for local settings and dependency outputs.
+
+`environment_dirs` names tool directory variables, such as `UV_CACHE_DIR`,
+`PIP_CACHE_DIR` or `NPM_CONFIG_CACHE`. Setup creates a separate directory for each
+variable and repository under `.hub/worktrees/<id>/setup/<repo>/environment/`,
+outside repository worktrees, and passes those paths only to setup subprocesses.
+The parent environment is unchanged; PATH, HOME and Hub/runtime routing variables
+cannot be used as directory variables. Configure virtual environment creation and
+its executables explicitly in command arrays when needed. These directories
+remain available for inspection after worktree cleanup.
+
+Use `[repos.<name>.setup]` in `hub.toml`, an overlay or ignored `local.toml` for
+overrides; tables merge and command/link/environment lists replace inherited
+lists. For example, `commands = []` disables shared dependency commands without
+discarding the other setup settings. Neither configuration nor a preview runs
+commands; see [setup operations](operations.md#repository-setup).
+
 Resources use `[[resources]]` entries:
 
 | Field | Meaning |
