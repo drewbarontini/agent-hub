@@ -42,17 +42,23 @@ def branch_name(unit, name):
     return f"hub/{unit['id']}/{name}"
 
 
-def load(config, identifier):
+def _read_record(config, identifier):
     unit = read_json(record_path(config, identifier))
     if unit.get("id") != identifier or unit.get("schema_version") != 1:
         raise HubError("Invalid work-unit record")
     for name, entry in unit.get("repos", {}).items():
-        config.repo(name)
         slug(name)
         if entry.get("branch") not in {f"hub/{identifier}/{name}", branch_name(unit, name)}:
             raise HubError("Invalid work branch")
         if not re.fullmatch(r"[0-9a-f]{40}", entry.get("base", "")):
             raise HubError("Invalid work base commit")
+    return unit
+
+
+def load(config, identifier):
+    unit = _read_record(config, identifier)
+    for name in unit.get("repos", {}):
+        config.repo(name)
     return unit
 
 
@@ -67,7 +73,8 @@ def location(config, identifier, name=None):
 
 
 def units(config):
-    return [load(config, p.parent.name)
+    # Retained history can refer to repositories no longer registered here.
+    return [_read_record(config, p.parent.name)
             for p in sorted((config.root / "work").glob("*/unit.json"))]
 
 
@@ -81,7 +88,7 @@ def resolve(config, reference):
         raise HubError("Ambiguous source key; use an execution ID: " + ", ".join(matches))
     if not matches:
         raise HubError("No recorded work matches this reference; resolve the source ticket before starting work")
-    return matches[0]
+    return load(config, matches[0])["id"]
 
 
 def create(config, title, intent, names, verification, source=None, resource_names=None):
@@ -173,7 +180,7 @@ def start(config, reference=None, *, title=None, intent=None, names=None,
             raise HubError("Source identity and work reference identify different executions")
         reused = bool(candidates)
         if reused:
-            unit = next(iter(candidates.values()))
+            unit = load(config, next(iter(candidates)))
             recorded_source = unit.get("source") or {}
             for field in ("provider", "id"):
                 if source.get(field) is not None and source[field] != recorded_source.get(field):

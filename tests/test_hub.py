@@ -446,6 +446,43 @@ class HubTests(unittest.TestCase):
         self.assertEqual(sorted(r["reused"] for r in results), [False, True])
         self.assertEqual(len(work.units(self.config)), 1)
 
+    def test_start_ignores_unregistered_repositories_in_unrelated_history(self):
+        historical = self.unit()
+        work.cleanup(self.config, historical["id"], apply=True)
+        source = {"provider": "example-tracker", "id": "analysis-page", "key": "ENG-43"}
+        active = work.create(self.config, "Analysis", "Reason about a fixture", [],
+                             "Review the reasoning", source=source)
+        self.register("")
+        for args in ([active["id"]], ["ENG-43"],
+                     ["--source-provider", source["provider"], "--source-id", source["id"]]):
+            with self.subTest(args=args):
+                resumed = json.loads(self.start_cli(*args).stdout)
+                self.assertEqual(resumed["id"], active["id"])
+                self.assertTrue(resumed["reused"])
+        self.assertEqual(work.resolve(self.config, "ENG-43"), active["id"])
+        created = json.loads(self.start_cli("--title", "New analysis", "--intent", "Reason about another fixture",
+                                           "--verify", "Review the reasoning", "--no-repos").stdout)
+        self.assertFalse(created["reused"])
+        self.assertEqual(created["status"], "prepared")
+        self.assertEqual(created["repos"], {})
+
+    def test_selected_execution_still_requires_registered_repositories(self):
+        selected = json.loads(self.start_cli(*self.start_args()).stdout)
+        self.register("")
+        record = work.record_path(self.config, selected["id"]).read_bytes()
+        for reference in (selected["id"], "ENG-42"):
+            with self.subTest(reference=reference):
+                with self.assertRaisesRegex(HubError, "Unregistered repository: alpha"):
+                    work.resolve(self.config, reference)
+                result = self.start_cli(reference, check=False)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn("Unregistered repository: alpha", result.stderr)
+        result = self.start_cli("--source-provider", "example-tracker", "--source-id", "immutable-page-id",
+                                check=False)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Unregistered repository: alpha", result.stderr)
+        self.assertEqual(work.record_path(self.config, selected["id"]).read_bytes(), record)
+
     def test_start_reuses_immutable_identity_without_renaming_branch(self):
         first = json.loads(self.start_cli(*self.start_args()).stdout)
         resumed = work.start(self.config, "NEW-42", source={"provider": "example-tracker",
