@@ -10,6 +10,24 @@ hub doctor
 hub resources
 ```
 
+In a generated VS Code workspace, new macOS/Linux terminals inherit the pinned
+launcher on PATH and `HUB_INSTANCE`, so these commands also work from repository
+folders. An explicit `--instance` takes precedence over that workspace default.
+
+```sh
+hub status --human
+hub work status APP-123 --human
+hub status --json
+```
+
+JSON remains the default on both status commands. The human view shows source
+keys, branches, changed files (up to eight per worktree), session state and next
+actions. Filenames are quoted; rename pairs retain both names. Status describes
+local execution state, not canonical ticket completion or live process liveness.
+Its suggestions run nothing and do not prove that cleanup is safe; inspect
+interrupted processes before releasing sessions and preview cleanup after merge.
+Missing or invalid work is reported for inspection rather than silently omitted.
+
 ## Bounded work
 
 After reading the canonical ticket and agreeing on the execution scope, start
