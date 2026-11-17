@@ -138,6 +138,7 @@ bounded requirements. See [operations](docs/operations.md#bounded-work).
 | --- | --- |
 | Initialization, attach/clone, visibility, workspace, diagnostics | Implemented and covered by Git integration tests |
 | Multi-repository worktrees, cleanup checks, optional branch hooks | Implemented and tested with disposable repositories |
+| Merged-work assessment and optional branch deletion | Explicit `work prune` with live origin proof; optional GitHub PR evidence recognizes squash merges while retaining original branches |
 | Codex launch plans, leases and outcome handoffs | Implemented; real launch requires supported Codex permissions and host sandbox |
 | Codex filesystem enforcement on this development host | Nested sandbox creation is blocked; native CLI end-to-end execution is unverified here |
 | Claude Code | Native Orchestrator/Worker launch plans and fail-closed Worker probe implemented; real Claude sessions and sandbox enforcement not yet verified |

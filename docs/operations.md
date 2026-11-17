@@ -181,6 +181,73 @@ and refresh refs through normal authorized Git operations. Stale refs can produc
 a conservative refusal. Branches, metadata and top-level work-unit artifacts remain.
 There is no force flag or automatic branch deletion.
 
+Both cleanup commands refuse index entries marked `assume-unchanged` or
+`skip-worktree`, even when Git reports a clean worktree: those flags can conceal
+edited files. Inspect the files and clear flags explicitly before reassessing;
+Hub never clears them automatically or rewrites the index to check cleanliness.
+
+### Assess merged work
+
+To assess all recorded executions, or one execution ID:
+
+```sh
+hub work prune
+hub work prune W-REPLACE_WITH_ID --delete-branches
+hub work prune W-REPLACE_WITH_ID --delete-branches --apply
+```
+
+Without `--apply`, this is a preview: no worktrees, refs, records or artifacts
+are changed. It contacts each eligible repository's origin with `git ls-remote`;
+the locally tracked origin default must match the live ref exactly. Refresh stale
+refs explicitly through normal authorized Git operations; no fetch is implicit.
+Missing credentials or an unreachable origin keep the execution in place.
+Status reads disable optional index writes. Partial clones are retained before
+status or history reads, since Git can otherwise fetch missing objects implicitly.
+Unknown or explicitly empty execution IDs return an error; only omitting the ID
+selects all recorded executions.
+
+Only recorded work in `review` or `cleaned` state is considered. Running or
+interrupted sessions, dirty/untracked/ignored files, locked or mismatched worktrees,
+extra commits, and branches checked out elsewhere block removal. Every repository
+in an execution must pass assessment before any is removed. This is local cleanup,
+not proof of canonical ticket completion, and it never changes ticket status.
+
+The preview reports each execution as `eligible` or `kept`, with reasons and
+per-repository planned actions. Apply re-reads the evidence before acting and
+reports actual `removed_worktrees` and `deleted_branches`; a Git removal refusal
+reports `failed` with a nonzero exit status and retains remaining work. Cross-repo
+removal is not atomic: inspect the reported actions before retrying a partial
+failure. Git's normal refusal behavior remains enabled, with no force flag.
+
+Branches remain unless `--delete-branches` is supplied. Deletion requires their
+original commits to be ancestors of both the local default and live origin
+default using original commit objects rather than local replacement history,
+then uses ordinary `git branch --delete`. Execution metadata and
+top-level artifacts remain for recovery even after successful removal. Unrecorded
+branches and worktrees are outside this command's scope.
+
+For optional GitHub PR evidence, including squash merges:
+
+```sh
+hub work prune W-REPLACE_WITH_ID --github
+hub work prune W-REPLACE_WITH_ID --github --apply
+```
+
+This uses [GitHub CLI's API interface](https://cli.github.com/manual/gh_api) with
+your existing authentication against a registered `github.com` origin. It requires
+a matching merged PR to the configured default branch, every local commit to be
+included in the PR's final head, and the PR merge commit in both local and live
+default histories. Open PRs, the latest PR closed without merging, missing objects,
+and incomplete or unavailable provider evidence preserve the work; explicit
+`--github` never silently falls back to Git-only proof.
+
+A verified squash merge can permit clean worktree removal, but its original
+commits are not ancestors of default. Those local branches remain even with
+`--delete-branches`, with the reason reported; PR merge state does not authorize
+discarding original commit history. This command does not install startup hooks
+or enable automatic cleanup. External processes can still race local checks;
+coordinate ownership before applying cleanup.
+
 If a session was interrupted, first verify its processes have ended. Only then:
 
 ```sh

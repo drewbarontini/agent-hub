@@ -12,6 +12,7 @@ does not authorize reading, exporting, or publishing its contents.
 | Sandbox preflight | Inside write succeeds; outside and `.git` write opens fail, or launch is blocked | Representative checks, not proof against every escape |
 | Optional Git hooks | Default commits and protected-target pushes refused | `--no-verify`, `git -c core.hooksPath=...` and direct edits bypass hooks |
 | Cleanup | Dirty, untracked, ignored, unmerged, extra local commits and active/interrupted leases refused | No distributed liveness detection or atomic protection against unrelated processes |
+| Merged-work assessment | Explicit apply, fresh origin refs, reviewed records and optional GitHub merge proof; branch deletion requires original commit ancestry locally and on live origin | Network/authentication and locally available objects required; squash-only branches retained; cross-repository removal is not atomic |
 | Secret scan | Known credential patterns, selected private/generated files and external symlinks flagged without showing values | Heuristic; cannot establish disclosure rights or find every secret |
 | Evolution | No Instance implementation export; adoption stages Core separately | Candidate tests execute code only on explicit apply; source must be trusted |
 
